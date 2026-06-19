@@ -1,11 +1,4 @@
-## [0.2.1](https://github.com/NoiXdev/nfc-keyboard-emulator/compare/v0.2.0...v0.2.1) (2026-06-19)
-
-
-### Bug Fixes
-
-* install x86_64 apple target and disable fail-fast in release workflow ([6f2d4c6](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/6f2d4c6488f5c5ff69cf202626f1cdedda7ee1ba))
-
-## [0.2.0](https://github.com/NoiXdev/nfc-keyboard-emulator/compare/9a196b3c52b4944bbcd7fe6128435e9410fd8a83...v0.2.0) (2026-06-19)
+## 0.3.0 (2026-06-19)
 
 
 ### Features
@@ -31,6 +24,7 @@
 
 ### Bug Fixes
 
+* install x86_64 apple target and disable fail-fast in release workflow ([6f2d4c6](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/6f2d4c6488f5c5ff69cf202626f1cdedda7ee1ba))
 * persist PC/SC reader state across polls to avoid busy-loop and event spam ([f7efb25](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/f7efb25e11d6fbb2b857c1d9fbac332896e808ed))
 * resolve linux-only clippy lints (unused_mut tray, dead_code NoAccessibility) ([703d36a](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/703d36a7beb69f9ed03937b202c97da807aeada3))
 
