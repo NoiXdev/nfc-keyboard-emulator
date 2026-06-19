@@ -6,7 +6,8 @@ use std::time::Duration;
 pub struct PcscReader {
     ctx: Context,
     selected: Option<CString>,
-    last_readers: Vec<String>,
+    pnp_state: State,
+    selected_state: State,
     card_present: bool,
     connected_emitted: bool,
 }
@@ -16,7 +17,8 @@ impl PcscReader {
         Ok(Self {
             ctx: Context::establish(Scope::User)?,
             selected: None,
-            last_readers: Vec::new(),
+            pnp_state: State::UNAWARE,
+            selected_state: State::UNAWARE,
             card_present: false,
             connected_emitted: false,
         })
@@ -45,13 +47,12 @@ impl ReaderBackend for PcscReader {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         };
-        let names: Vec<String> = readers.map(|c| c.to_string_lossy().into_owned()).collect();
-        self.last_readers = names.clone();
-        names
+        readers.map(|c| c.to_string_lossy().into_owned()).collect()
     }
 
     fn set_selected(&mut self, name: Option<String>) {
         self.selected = name.and_then(|n| CString::new(n).ok());
+        self.selected_state = State::UNAWARE;
         self.card_present = false;
         self.connected_emitted = false;
     }
@@ -61,17 +62,29 @@ impl ReaderBackend for PcscReader {
 
         let Some(selected) = self.selected.clone() else {
             // Ohne gewählten Leser nur auf Reader-Plug/Unplug lauschen.
-            let mut states = vec![ReaderState::new(PNP_NOTIFICATION(), State::UNAWARE)];
-            if self.ctx.get_status_change(timeout, &mut states).is_ok() {
-                let names = self.list_readers();
-                events.push(ReaderEvent::ReadersChanged(names));
+            let mut states = vec![ReaderState::new(PNP_NOTIFICATION(), self.pnp_state)];
+            match self.ctx.get_status_change(timeout, &mut states) {
+                Ok(()) => {
+                    let event_state = states[0].event_state();
+                    self.pnp_state = event_state;
+                    if event_state.contains(State::CHANGED) {
+                        let names = self.list_readers();
+                        events.push(ReaderEvent::ReadersChanged(names));
+                    }
+                }
+                Err(pcsc::Error::Timeout) => {}
+                Err(e) => {
+                    events.push(ReaderEvent::Status(ReaderStatus::Error {
+                        message: e.to_string(),
+                    }));
+                }
             }
             return events;
         };
 
         let mut states = vec![
-            ReaderState::new(PNP_NOTIFICATION(), State::UNAWARE),
-            ReaderState::new(selected.as_c_str(), State::UNAWARE),
+            ReaderState::new(PNP_NOTIFICATION(), self.pnp_state),
+            ReaderState::new(selected.as_c_str(), self.selected_state),
         ];
 
         match self.ctx.get_status_change(timeout, &mut states) {
@@ -85,17 +98,18 @@ impl ReaderBackend for PcscReader {
             }
         }
 
-        for rs in &states {
-            if rs.name() == PNP_NOTIFICATION() {
-                if rs.event_state().contains(State::CHANGED) {
-                    let names = self.list_readers();
-                    events.push(ReaderEvent::ReadersChanged(names));
-                }
-                continue;
-            }
+        // Zustände lesen bevor states dropped wird (Copy)
+        let new_pnp_state = states[0].event_state();
+        let new_selected_state = states[1].event_state();
 
-            let es = rs.event_state();
-            let reader_name = rs.name().to_string_lossy().into_owned();
+        if new_pnp_state.contains(State::CHANGED) {
+            let names = self.list_readers();
+            events.push(ReaderEvent::ReadersChanged(names));
+        }
+
+        {
+            let es = new_selected_state;
+            let reader_name = selected.to_string_lossy().into_owned();
 
             if es.contains(State::UNAVAILABLE) || es.contains(State::UNKNOWN) {
                 if self.connected_emitted {
@@ -103,35 +117,33 @@ impl ReaderBackend for PcscReader {
                     events.push(ReaderEvent::Status(ReaderStatus::Disconnected));
                 }
                 self.card_present = false;
-                continue;
-            }
-
-            if !self.connected_emitted {
-                self.connected_emitted = true;
-                events.push(ReaderEvent::Status(ReaderStatus::Connected));
-            }
-
-            let present = es.contains(State::PRESENT);
-            if present && !self.card_present {
-                self.card_present = true;
-                match self.read_uid(&selected) {
-                    Some(uid) => events.push(ReaderEvent::Scan {
-                        reader: reader_name,
-                        uid,
-                    }),
-                    None => events.push(ReaderEvent::ReadError {
-                        reader: reader_name,
-                    }),
+            } else {
+                if !self.connected_emitted {
+                    self.connected_emitted = true;
+                    events.push(ReaderEvent::Status(ReaderStatus::Connected));
                 }
-            } else if !present {
-                self.card_present = false;
+
+                let present = es.contains(State::PRESENT);
+                if present && !self.card_present {
+                    self.card_present = true;
+                    match self.read_uid(&selected) {
+                        Some(uid) => events.push(ReaderEvent::Scan {
+                            reader: reader_name,
+                            uid,
+                        }),
+                        None => events.push(ReaderEvent::ReadError {
+                            reader: reader_name,
+                        }),
+                    }
+                } else if !present {
+                    self.card_present = false;
+                }
             }
         }
 
-        // current_state für nächsten Zyklus aktualisieren
-        for rs in &mut states {
-            rs.sync_current_state();
-        }
+        // Zustände für nächsten Zyklus persistieren
+        self.pnp_state = new_pnp_state;
+        self.selected_state = new_selected_state;
 
         events
     }
