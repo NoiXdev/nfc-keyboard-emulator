@@ -6,6 +6,7 @@ mod csv_export;
 mod formatter;
 mod pipeline;
 mod reader;
+mod reader_pcsc;
 mod scan;
 mod typer;
 
