@@ -72,9 +72,24 @@ pub fn set_start_minimized(app: tauri::AppHandle, state: State<AppState>, value:
 }
 
 #[tauri::command]
-pub fn export_log_csv(state: State<AppState>) -> String {
+pub fn export_log_csv(app: tauri::AppHandle, state: State<AppState>) -> bool {
+    use tauri_plugin_dialog::DialogExt;
     let history: Vec<ScanRecord> = state.history.lock().unwrap().iter().cloned().collect();
-    scans_to_csv(&history)
+    let csv = scans_to_csv(&history);
+    // Rust-seitiger Speichern-Dialog + Write: braucht keine fs-Capability/Scope.
+    let Some(path) = app
+        .dialog()
+        .file()
+        .add_filter("CSV", &["csv"])
+        .set_file_name("nfc-scans.csv")
+        .blocking_save_file()
+    else {
+        return false;
+    };
+    match path.into_path() {
+        Ok(p) => std::fs::write(p, csv).is_ok(),
+        Err(_) => false,
+    }
 }
 
 #[tauri::command]

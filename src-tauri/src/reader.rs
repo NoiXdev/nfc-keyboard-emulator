@@ -21,6 +21,8 @@ pub enum ReaderEvent {
 pub enum WorkerCommand {
     SelectReader(Option<String>),
     Rescan,
+    // Reserved for tests; not constructed in production code.
+    #[allow(dead_code)]
     Shutdown,
 }
 
