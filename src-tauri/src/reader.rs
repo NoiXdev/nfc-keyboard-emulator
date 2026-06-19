@@ -43,7 +43,11 @@ pub mod mock {
 
     impl MockReader {
         pub fn new(readers: Vec<String>) -> Self {
-            Self { readers, selected: None, queued: VecDeque::new() }
+            Self {
+                readers,
+                selected: None,
+                queued: VecDeque::new(),
+            }
         }
         pub fn queue(&mut self, batch: Vec<ReaderEvent>) {
             self.queued.push_back(batch);
@@ -65,7 +69,10 @@ pub mod mock {
     #[test]
     fn mock_pops_queued_batches_then_empties() {
         let mut m = MockReader::new(vec!["A".into()]);
-        m.queue(vec![ReaderEvent::Scan { reader: "A".into(), uid: vec![1, 2] }]);
+        m.queue(vec![ReaderEvent::Scan {
+            reader: "A".into(),
+            uid: vec![1, 2],
+        }]);
         assert_eq!(m.poll(Duration::from_millis(1)).len(), 1);
         assert_eq!(m.poll(Duration::from_millis(1)).len(), 0);
     }

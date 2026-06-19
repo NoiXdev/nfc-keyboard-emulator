@@ -45,9 +45,7 @@ impl ReaderBackend for PcscReader {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         };
-        let names: Vec<String> = readers
-            .map(|c| c.to_string_lossy().into_owned())
-            .collect();
+        let names: Vec<String> = readers.map(|c| c.to_string_lossy().into_owned()).collect();
         self.last_readers = names.clone();
         names
     }
@@ -80,7 +78,9 @@ impl ReaderBackend for PcscReader {
             Ok(()) => {}
             Err(pcsc::Error::Timeout) => return events,
             Err(e) => {
-                events.push(ReaderEvent::Status(ReaderStatus::Error { message: e.to_string() }));
+                events.push(ReaderEvent::Status(ReaderStatus::Error {
+                    message: e.to_string(),
+                }));
                 return events;
             }
         }
@@ -115,8 +115,13 @@ impl ReaderBackend for PcscReader {
             if present && !self.card_present {
                 self.card_present = true;
                 match self.read_uid(&selected) {
-                    Some(uid) => events.push(ReaderEvent::Scan { reader: reader_name, uid }),
-                    None => events.push(ReaderEvent::ReadError { reader: reader_name }),
+                    Some(uid) => events.push(ReaderEvent::Scan {
+                        reader: reader_name,
+                        uid,
+                    }),
+                    None => events.push(ReaderEvent::ReadError {
+                        reader: reader_name,
+                    }),
                 }
             } else if !present {
                 self.card_present = false;
@@ -161,7 +166,10 @@ mod hw_tests {
             }
         }
         let uid = got_uid.expect("keine Karte innerhalb 15s gelesen");
-        println!("UID: {}", uid.iter().map(|b| format!("{b:02X}")).collect::<String>());
+        println!(
+            "UID: {}",
+            uid.iter().map(|b| format!("{b:02X}")).collect::<String>()
+        );
         assert!((4..=10).contains(&uid.len()));
     }
 }
