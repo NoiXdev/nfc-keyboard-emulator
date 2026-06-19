@@ -1,160 +1,80 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { onMounted, onUnmounted, ref } from "vue";
+import {
+  api, onScan, onReadersChanged, onReaderStatus,
+  type Config, type FormatConfig, type ReaderStatus, type ScanRecord,
+} from "./lib/tauri";
+import { pushScan } from "./lib/scanLog";
+import ReaderSelect from "./components/ReaderSelect.vue";
+import TypingToggle from "./components/TypingToggle.vue";
+import FormatSettings from "./components/FormatSettings.vue";
+import ScanLog from "./components/ScanLog.vue";
+import StatusBar from "./components/StatusBar.vue";
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
-const greetMsg = ref("");
-const name = ref("");
+const config = ref<Config | null>(null);
+const readers = ref<string[]>([]);
+const scans = ref<ScanRecord[]>([]);
+const status = ref<ReaderStatus | null>(null);
+const typing = ref(false);
+const accessibilityOk = ref(true);
+const unlisten: Array<() => void> = [];
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
+const autostart = ref(false);
+const startMinimized = ref(false);
+
+onMounted(async () => {
+  config.value = await api.getConfig();
+  typing.value = config.value.typingEnabledOnStart;
+  readers.value = await api.listReaders();
+  accessibilityOk.value = await api.checkAccessibility();
+  unlisten.push(await onScan((r) => { scans.value = pushScan(scans.value, r, config.value!.logRetention); }));
+  unlisten.push(await onReadersChanged((r) => { readers.value = r; }));
+  unlisten.push(await onReaderStatus((s) => { status.value = s; }));
+  autostart.value = await isAutostartEnabled();
+  startMinimized.value = config.value!.startMinimized;
+});
+onUnmounted(() => unlisten.forEach((fn) => fn()));
+
+function selectReader(name: string | null) { config.value!.selectedReader = name; api.selectReader(name); }
+function toggleTyping(value: boolean) { typing.value = value; api.setTypingEnabled(value); }
+function changeFormat(format: FormatConfig) { config.value!.format = format; api.updateFormat(format); }
+async function fixAccessibility() { await api.openAccessibilitySettings(); accessibilityOk.value = await api.checkAccessibility(); }
+async function exportCsv() {
+  await api.exportLogCsv();
 }
+
+async function toggleAutostart(v: boolean) { if (v) await enableAutostart(); else await disableAutostart(); autostart.value = v; }
+function toggleStartMinimized(v: boolean) { startMinimized.value = v; api.setStartMinimized(v); }
 </script>
 
 <template>
-  <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
-
-    <div class="row">
-      <a href="https://vite.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
-    </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
-
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
+  <main v-if="config">
+    <h1>NFC-Keyboard-Emulator</h1>
+    <ReaderSelect :readers="readers" :selected="config.selectedReader" @select="selectReader" @rescan="api.rescanReaders()" />
+    <TypingToggle :enabled="typing" @toggle="toggleTyping" />
+    <FormatSettings :format="config.format" @change="changeFormat" />
+    <ScanLog :scans="scans" @export="exportCsv" />
+    <section class="options">
+      <h2>Optionen</h2>
+      <label>
+        <input type="checkbox" :checked="autostart" @change="toggleAutostart(($event.target as HTMLInputElement).checked)" />
+        Autostart beim Systemstart
+      </label>
+      <label>
+        <input type="checkbox" :checked="startMinimized" @change="toggleStartMinimized(($event.target as HTMLInputElement).checked)" />
+        Minimiert starten
+      </label>
+    </section>
+    <StatusBar :status="status" :accessibility-ok="accessibilityOk" :typing="typing" @fix-accessibility="fixAccessibility" />
   </main>
 </template>
 
-<style scoped>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
-}
-
-</style>
 <style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
+main { font-family: system-ui, sans-serif; padding: 16px; display: grid; gap: 16px; max-width: 820px; margin: 0 auto; }
+</style>
 
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
+<style scoped>
+.options { display: grid; gap: 8px; }
+.options label { display: flex; gap: 8px; align-items: center; font-size: 14px; }
 </style>
