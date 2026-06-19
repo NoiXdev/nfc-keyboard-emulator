@@ -5,6 +5,7 @@ mod config;
 mod csv_export;
 mod formatter;
 mod scan;
+mod typer;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
