@@ -1,5 +1,18 @@
 name: Release
 
+# Builds the app on macOS + Windows and attaches the bundles to the GitHub
+# Release that the Changelog workflow created for the tag.
+#
+# macOS is signed (Developer ID Application) + notarized via the App Store
+# Connect API key. The signing material lives in NoiXdev organization secrets
+# (available to this repo once it is public):
+#   - MACOS_CERTIFICATE            base64 of the Developer ID Application .p12
+#   - MACOS_CERTIFICATE_PASSWORD   its password
+#   - APPLE_API_KEY                base64 of the App Store Connect .p8 key
+#   - APPLE_API_KEY_ID             the key id
+#   - APPLE_API_ISSUER             the issuer id
+# Windows stays unsigned for now (SmartScreen note in the README).
+
 on:
   push:
     tags: ["v*"]
@@ -21,6 +34,10 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      # Only sign on macOS when the certificate secret is present (e.g. the repo
+      # is public so org secrets resolve). Otherwise build unsigned.
+      HAS_MACOS_SIGNING: ${{ secrets.MACOS_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,18 +49,34 @@ jobs:
         with: { workspaces: "src-tauri" }
       - run: npm ci
 
-      - name: Build, sign, notarize & attach to release
+      - name: Import signing certificate (macOS)
+        if: matrix.os == 'macos-latest' && env.HAS_MACOS_SIGNING == 'true'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+
+      - name: Prepare notarization + signing identity (macOS)
+        if: matrix.os == 'macos-latest' && env.HAS_MACOS_SIGNING == 'true'
+        run: |
+          KEY_PATH="$RUNNER_TEMP/apple_api_key.p8"
+          echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > "$KEY_PATH"
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_ID=${{ secrets.APPLE_API_KEY_ID }}" >> "$GITHUB_ENV"
+          echo "APPLE_API_ISSUER=${{ secrets.APPLE_API_ISSUER }}" >> "$GITHUB_ENV"
+          # tauri needs the identity name; read it from the imported keychain cert.
+          IDENTITY=$(security find-identity -v -p codesigning | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build & attach to release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing + notarization (nur wirksam auf macos-latest)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           args: ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}
+
+      - name: Clean up notarization key (macOS)
+        if: always() && matrix.os == 'macos-latest' && env.HAS_MACOS_SIGNING == 'true'
+        run: rm -f "$RUNNER_TEMP/apple_api_key.p8"
