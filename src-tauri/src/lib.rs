@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod accessibility;
 mod config;
 mod csv_export;
 mod formatter;
