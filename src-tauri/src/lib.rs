@@ -5,6 +5,7 @@ mod config;
 mod csv_export;
 mod formatter;
 mod pipeline;
+mod reader;
 mod scan;
 mod typer;
 
