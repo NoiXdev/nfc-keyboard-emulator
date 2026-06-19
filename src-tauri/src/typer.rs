@@ -3,6 +3,8 @@ use crate::formatter::FormattedScan;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeError {
+    // Nur auf macOS konstruiert (fehlendes Bedienungshilfen-Recht).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     NoAccessibility,
     Other(String),
 }

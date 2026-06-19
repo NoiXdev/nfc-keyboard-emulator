@@ -83,11 +83,11 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
-            let mut tray = TrayIconBuilder::new().icon(tray_icon).menu(&menu);
+            let tray = TrayIconBuilder::new().icon(tray_icon).menu(&menu);
+            // macOS: Template-Icon passt sich Hell/Dunkel an (Shadowing statt `mut`,
+            // damit es auf Nicht-macOS kein unused_mut gibt).
             #[cfg(target_os = "macos")]
-            {
-                tray = tray.icon_as_template(true);
-            }
+            let tray = tray.icon_as_template(true);
             let _tray = tray
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
