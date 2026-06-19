@@ -82,9 +82,13 @@ pub fn run() {
             let show = MenuItem::with_id(app, "show", "Anzeigen", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+            let mut tray = TrayIconBuilder::new().icon(tray_icon).menu(&menu);
+            #[cfg(target_os = "macos")]
+            {
+                tray = tray.icon_as_template(true);
+            }
+            let _tray = tray
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(w) = app.get_webview_window("main") {
