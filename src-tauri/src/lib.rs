@@ -8,6 +8,7 @@ mod pipeline;
 mod reader;
 mod reader_pcsc;
 mod scan;
+mod state;
 mod typer;
 mod worker;
 
