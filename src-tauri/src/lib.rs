@@ -9,6 +9,7 @@ mod reader;
 mod reader_pcsc;
 mod scan;
 mod typer;
+mod worker;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
