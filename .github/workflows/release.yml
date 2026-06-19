@@ -43,5 +43,4 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseId: ${{ github.event_name == 'workflow_dispatch' && '' || '' }}
           args: ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}
