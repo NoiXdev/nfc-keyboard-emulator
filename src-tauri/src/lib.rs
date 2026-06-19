@@ -4,6 +4,7 @@ mod accessibility;
 mod config;
 mod csv_export;
 mod formatter;
+mod pipeline;
 mod scan;
 mod typer;
 
