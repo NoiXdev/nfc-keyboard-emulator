@@ -43,25 +43,37 @@ mod tests {
 
     #[test]
     fn lowercase() {
-        let c = FormatConfig { case: Case::Lower, ..cfg() };
+        let c = FormatConfig {
+            case: Case::Lower,
+            ..cfg()
+        };
         assert_eq!(format_uid(&UID4, &c).body, "04a1b2c3");
     }
 
     #[test]
     fn colon_separator() {
-        let c = FormatConfig { separator: ":".into(), ..cfg() };
+        let c = FormatConfig {
+            separator: ":".into(),
+            ..cfg()
+        };
         assert_eq!(format_uid(&UID4, &c).body, "04:A1:B2:C3");
     }
 
     #[test]
     fn reversed_byte_order() {
-        let c = FormatConfig { byte_order: ByteOrder::Reversed, ..cfg() };
+        let c = FormatConfig {
+            byte_order: ByteOrder::Reversed,
+            ..cfg()
+        };
         assert_eq!(format_uid(&UID4, &c).body, "C3B2A104");
     }
 
     #[test]
     fn prefix_is_prepended() {
-        let c = FormatConfig { prefix: "ID".into(), ..cfg() };
+        let c = FormatConfig {
+            prefix: "ID".into(),
+            ..cfg()
+        };
         assert_eq!(format_uid(&UID4, &c).body, "ID04A1B2C3");
     }
 
@@ -72,7 +84,10 @@ mod tests {
 
     #[test]
     fn suffix_is_passed_through() {
-        let c = FormatConfig { suffix: Suffix::Tab, ..cfg() };
+        let c = FormatConfig {
+            suffix: Suffix::Tab,
+            ..cfg()
+        };
         assert_eq!(format_uid(&UID4, &c).suffix, Suffix::Tab);
     }
 }

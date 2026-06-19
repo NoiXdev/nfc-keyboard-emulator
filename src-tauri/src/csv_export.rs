@@ -2,8 +2,16 @@ use crate::scan::ScanRecord;
 
 pub fn scans_to_csv(scans: &[ScanRecord]) -> String {
     let mut wtr = csv::WriterBuilder::new().from_writer(vec![]);
-    wtr.write_record(["timestamp", "reader", "uidHex", "uidLength", "typed", "typedString", "status"])
-        .expect("header");
+    wtr.write_record([
+        "timestamp",
+        "reader",
+        "uidHex",
+        "uidLength",
+        "typed",
+        "typedString",
+        "status",
+    ])
+    .expect("header");
     for s in scans {
         let status = serde_json::to_value(s.status)
             .ok()

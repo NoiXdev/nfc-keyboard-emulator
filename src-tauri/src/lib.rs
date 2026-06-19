@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod config;
 mod csv_export;
 mod formatter;
