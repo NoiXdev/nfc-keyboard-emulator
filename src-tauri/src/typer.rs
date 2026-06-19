@@ -104,8 +104,11 @@ pub mod mock {
     #[test]
     fn mock_records_calls() {
         let mut t = MockTyper::ok();
-        t.type_scan(&FormattedScan { body: "AB".into(), suffix: Suffix::Enter })
-            .unwrap();
+        t.type_scan(&FormattedScan {
+            body: "AB".into(),
+            suffix: Suffix::Enter,
+        })
+        .unwrap();
         assert_eq!(t.call_count(), 1);
     }
 }
