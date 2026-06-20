@@ -61,8 +61,12 @@ jobs:
         run: |
           KEY_PATH="$RUNNER_TEMP/apple_api_key.p8"
           echo "${{ secrets.APPLE_API_KEY }}" | base64 --decode > "$KEY_PATH"
-          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
-          echo "APPLE_API_KEY_ID=${{ secrets.APPLE_API_KEY_ID }}" >> "$GITHUB_ENV"
+          # tauri's App Store Connect API-key notarization expects:
+          #   APPLE_API_KEY      = the key id
+          #   APPLE_API_KEY_PATH = the .p8 file
+          #   APPLE_API_ISSUER   = the issuer id
+          echo "APPLE_API_KEY=${{ secrets.APPLE_API_KEY_ID }}" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
           echo "APPLE_API_ISSUER=${{ secrets.APPLE_API_ISSUER }}" >> "$GITHUB_ENV"
           # tauri needs the identity name; read it from the imported keychain cert.
           IDENTITY=$(security find-identity -v -p codesigning | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')
