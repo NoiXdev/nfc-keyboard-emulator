@@ -90,4 +90,16 @@ export default {
     step3: "Restart the app if needed",
     button: "Open settings & re-check",
   },
+  notify: {
+    label: "Notifications",
+    off: "Off",
+    errors: "Errors only",
+    all: "All scans",
+    scanned: "Card scanned",
+    typed: "{uid} – typed",
+    notTyped: "{uid} – not typed",
+    readError: "Could not read the card",
+    noAccessibility: "Not typed – accessibility access missing",
+    typeError: "{uid} – could not be typed",
+  },
 } as const;

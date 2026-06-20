@@ -90,4 +90,16 @@ export default {
     step3: "App ggf. neu starten",
     button: "Einstellungen öffnen & erneut prüfen",
   },
+  notify: {
+    label: "Benachrichtigungen",
+    off: "Aus",
+    errors: "Nur Fehler",
+    all: "Alle Scans",
+    scanned: "Karte gescannt",
+    typed: "{uid} – getippt",
+    notTyped: "{uid} – nicht getippt",
+    readError: "Karte konnte nicht gelesen werden",
+    noAccessibility: "Nicht getippt – Bedienungshilfen fehlen",
+    typeError: "{uid} – konnte nicht getippt werden",
+  },
 } as const;

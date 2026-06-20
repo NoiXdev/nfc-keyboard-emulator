@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   api,
@@ -28,6 +28,11 @@ import {
   disable as disableAutostart,
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 
 const { t, locale } = useI18n();
 
@@ -48,6 +53,64 @@ const languageOptions = [
   { value: "en", label: "English" },
 ];
 
+type NotifyMode = "off" | "errors" | "all";
+const notifyMode = ref<NotifyMode>(
+  (localStorage.getItem("notify") as NotifyMode | null) ?? "all",
+);
+let notifyAllowed = false;
+const notifyOptions = computed(() => [
+  { value: "off", label: t("notify.off") },
+  { value: "errors", label: t("notify.errors") },
+  { value: "all", label: t("notify.all") },
+]);
+const ERROR_STATUS: ScanRecord["status"][] = [
+  "read_error",
+  "no_accessibility",
+  "type_error",
+];
+
+async function ensureNotifyPermission() {
+  notifyAllowed = await isPermissionGranted();
+  if (!notifyAllowed) notifyAllowed = (await requestPermission()) === "granted";
+}
+async function setNotifyMode(value: string) {
+  notifyMode.value = value as NotifyMode;
+  localStorage.setItem("notify", value);
+  if (value !== "off") await ensureNotifyPermission();
+}
+function notifyForScan(r: ScanRecord) {
+  if (notifyMode.value === "off" || !notifyAllowed) return;
+  const isError = ERROR_STATUS.includes(r.status);
+  if (notifyMode.value === "errors" && !isError) return;
+  let title: string;
+  let body: string;
+  switch (r.status) {
+    case "ok":
+      title = t("notify.scanned");
+      body = t("notify.typed", { uid: r.uidHex });
+      break;
+    case "typing_disabled":
+      title = t("notify.scanned");
+      body = t("notify.notTyped", { uid: r.uidHex });
+      break;
+    case "read_error":
+      title = t("status.read_error");
+      body = t("notify.readError");
+      break;
+    case "no_accessibility":
+      title = t("status.no_accessibility");
+      body = t("notify.noAccessibility");
+      break;
+    case "type_error":
+      title = t("status.type_error");
+      body = t("notify.typeError", { uid: r.uidHex });
+      break;
+    default:
+      return;
+  }
+  void sendNotification({ title, body });
+}
+
 onMounted(async () => {
   config.value = await api.getConfig();
   typing.value = config.value.typingEnabledOnStart;
@@ -56,12 +119,14 @@ onMounted(async () => {
   unlisten.push(
     await onScan((r) => {
       scans.value = pushScan(scans.value, r, config.value!.logRetention);
+      notifyForScan(r);
     }),
   );
   unlisten.push(await onReadersChanged((r) => (readers.value = r)));
   unlisten.push(await onReaderStatus((s) => (status.value = s)));
   autostart.value = await isAutostartEnabled();
   startMinimized.value = config.value!.startMinimized;
+  if (notifyMode.value !== "off") await ensureNotifyPermission();
 });
 onUnmounted(() => unlisten.forEach((fn) => fn()));
 
@@ -137,6 +202,17 @@ function changeLanguage(v: string) {
             <div class="opt-row">
               <Toggle :model-value="startMinimized" @update:model-value="toggleStartMinimized" />
               <span>{{ t("options.startMinimized") }}</span>
+            </div>
+          </div>
+
+          <div class="card opt-card">
+            <span class="opt-title">{{ t("notify.label") }}</span>
+            <div class="lang">
+              <Select
+                :model-value="notifyMode"
+                :options="notifyOptions"
+                @update:model-value="setNotifyMode"
+              />
             </div>
           </div>
 
