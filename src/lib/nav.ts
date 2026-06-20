@@ -1,4 +1,4 @@
-export type NavView = "scanner" | "log" | "options" | "accessibility";
+export type NavView = "scanner" | "log" | "options" | "accessibility" | "about";
 
 export interface NavGroup {
   groupKey: "groupScanner" | "groupSettings";

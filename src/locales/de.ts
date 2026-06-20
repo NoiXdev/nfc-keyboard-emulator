@@ -7,6 +7,7 @@ export default {
     options: "Optionen",
     accessibility: "Bedienungshilfen",
     accessibilityMissing: "Bedienungshilfen fehlen",
+    about: "Über",
   },
   view: {
     scannerTitle: "Scanner",
@@ -17,6 +18,8 @@ export default {
     optionsSub: "Ausgabeformat und Startverhalten.",
     accessibilityTitle: "Bedienungshilfen",
     accessibilitySub: "Berechtigung zum Tippen in andere Apps.",
+    aboutTitle: "Über",
+    aboutSub: "Version, Lizenzen und Projekt.",
   },
   reader: {
     active: "Aktiver Leser",
@@ -101,5 +104,16 @@ export default {
     readError: "Karte konnte nicht gelesen werden",
     noAccessibility: "Nicht getippt – Bedienungshilfen fehlen",
     typeError: "{uid} – konnte nicht getippt werden",
+  },
+  about: {
+    tagline: "Verwandelt einen kontaktlosen Kartenleser in eine Tastatur.",
+    version: "Version",
+    website: "noix.dev besuchen",
+    appLicense: "Lizenz",
+    appLicenseNote: "MIT-Lizenz © 2026 NoiXdev",
+    thirdParty: "Open-Source-Lizenzen",
+    thirdPartyNote: "Diese App nutzt freie Software von Dritten:",
+    rust: "Rust-Crates",
+    npm: "npm-Pakete",
   },
 } as const;

@@ -21,6 +21,7 @@ import FormatSettings from "./components/FormatSettings.vue";
 import ScanLog from "./components/ScanLog.vue";
 import StatusBar from "./components/StatusBar.vue";
 import AccessibilityPanel from "./components/AccessibilityPanel.vue";
+import AboutPanel from "./components/AboutPanel.vue";
 import Toggle from "./components/Toggle.vue";
 import Select from "./components/Select.vue";
 import {
@@ -228,7 +229,13 @@ function changeLanguage(v: string) {
           </div>
         </template>
 
-        <AccessibilityPanel v-else :ok="accessibilityOk" @fix="fixAccessibility" />
+        <AccessibilityPanel
+          v-else-if="activeView === 'accessibility'"
+          :ok="accessibilityOk"
+          @fix="fixAccessibility"
+        />
+
+        <AboutPanel v-else />
       </div>
 
       <StatusBar :status="status" :typing="typing" />

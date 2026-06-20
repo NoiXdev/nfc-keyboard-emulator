@@ -7,6 +7,7 @@ export default {
     options: "Options",
     accessibility: "Accessibility",
     accessibilityMissing: "Accessibility access missing",
+    about: "About",
   },
   view: {
     scannerTitle: "Scanner",
@@ -17,6 +18,8 @@ export default {
     optionsSub: "Output format and startup behaviour.",
     accessibilityTitle: "Accessibility",
     accessibilitySub: "Permission to type into other apps.",
+    aboutTitle: "About",
+    aboutSub: "Version, licenses and project.",
   },
   reader: {
     active: "Active reader",
@@ -101,5 +104,16 @@ export default {
     readError: "Could not read the card",
     noAccessibility: "Not typed – accessibility access missing",
     typeError: "{uid} – could not be typed",
+  },
+  about: {
+    tagline: "Turns a contactless card reader into a keyboard.",
+    version: "Version",
+    website: "Visit noix.dev",
+    appLicense: "License",
+    appLicenseNote: "MIT License © 2026 NoiXdev",
+    thirdParty: "Open-source licenses",
+    thirdPartyNote: "This app bundles free third-party software:",
+    rust: "Rust crates",
+    npm: "npm packages",
   },
 } as const;

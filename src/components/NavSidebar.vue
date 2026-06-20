@@ -69,6 +69,19 @@ const { t } = useI18n();
         </button>
       </div>
     </nav>
+
+    <button
+      class="item bottom"
+      :class="{ active: active === 'about' }"
+      @click="$emit('navigate', 'about')"
+    >
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <line x1="12" y1="11" x2="12" y2="16" />
+        <circle cx="12" cy="8" r="0.6" fill="currentColor" />
+      </svg>
+      <span>{{ t("nav.about") }}</span>
+    </button>
   </aside>
 </template>
 
@@ -138,6 +151,9 @@ nav {
   background: rgba(20, 184, 166, 0.16);
   border-left-color: #14b8a6;
   color: #fff;
+}
+.bottom {
+  margin-top: auto;
 }
 .icon {
   width: 18px;
