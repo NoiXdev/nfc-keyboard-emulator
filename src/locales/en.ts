@@ -116,4 +116,12 @@ export default {
     rust: "Rust crates",
     npm: "npm packages",
   },
+  update: {
+    check: "Check for updates",
+    checking: "Checking …",
+    upToDate: "You're on the latest version.",
+    available: "Version {version} is available.",
+    download: "Download",
+    failed: "Update check failed.",
+  },
 } as const;

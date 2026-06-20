@@ -2,7 +2,7 @@
 import { useI18n } from "vue-i18n";
 import { NAV_GROUPS, type NavView } from "../lib/nav";
 
-defineProps<{ active: NavView; accessibilityOk: boolean }>();
+defineProps<{ active: NavView; accessibilityOk: boolean; updateAvailable: boolean }>();
 defineEmits<{ navigate: [view: NavView] }>();
 
 const { t } = useI18n();
@@ -81,6 +81,7 @@ const { t } = useI18n();
         <circle cx="12" cy="8" r="0.6" fill="currentColor" />
       </svg>
       <span>{{ t("nav.about") }}</span>
+      <span v-if="updateAvailable" class="badge update-badge"></span>
     </button>
   </aside>
 </template>
@@ -166,5 +167,8 @@ nav {
   border-radius: 50%;
   background: #f97066;
   margin-left: auto;
+}
+.update-badge {
+  background: #14b8a6;
 }
 </style>

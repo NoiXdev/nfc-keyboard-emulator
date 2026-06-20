@@ -4,6 +4,10 @@ import { useI18n } from "vue-i18n";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { rustLicenses, npmLicenses } from "../lib/licenses";
+import type { UpdateInfo } from "../lib/update";
+
+defineProps<{ update: UpdateInfo | null; checking: boolean }>();
+defineEmits<{ recheck: [] }>();
 
 const { t } = useI18n();
 const version = ref("");
@@ -46,6 +50,21 @@ onMounted(async () => {
       </svg>
       {{ t("about.website") }}
     </button>
+
+    <div class="card update">
+      <button class="btn" :disabled="checking" @click="$emit('recheck')">
+        {{ checking ? t("update.checking") : t("update.check") }}
+      </button>
+      <span class="up-status" :class="{ avail: update && update.available }">
+        <template v-if="checking"></template>
+        <template v-else-if="update && update.available">
+          {{ t("update.available", { version: update.latest }) }}
+          <a class="dl" @click="openUrl(update.url)">{{ t("update.download") }}</a>
+        </template>
+        <template v-else-if="update && update.ok">{{ t("update.upToDate") }}</template>
+        <template v-else-if="update && !update.ok">{{ t("update.failed") }}</template>
+      </span>
+    </div>
 
     <div class="card app-license">
       <span class="lbl">{{ t("about.appLicense") }}</span>
@@ -125,6 +144,45 @@ onMounted(async () => {
 .link svg {
   width: 17px;
   height: 17px;
+}
+.card.update {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #fff;
+  border: 1px solid #e4e7f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.update .btn {
+  padding: 8px 13px;
+  border: 1px solid #d4d9e6;
+  border-radius: 8px;
+  background: #f4f5fa;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.update .btn:hover:not(:disabled) {
+  background: #e9ecf6;
+}
+.update .btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.up-status {
+  font-size: 13px;
+  color: #5b6478;
+}
+.up-status.avail {
+  color: #0f5f53;
+  font-weight: 500;
+}
+.dl {
+  color: #14b8a6;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
 }
 .card.app-license {
   display: flex;

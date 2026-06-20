@@ -14,6 +14,7 @@ import {
 import { pushScan } from "./lib/scanLog";
 import { type NavView } from "./lib/nav";
 import { setLocale, type Locale } from "./i18n";
+import { checkForUpdate, type UpdateInfo } from "./lib/update";
 import NavSidebar from "./components/NavSidebar.vue";
 import ReaderSelect from "./components/ReaderSelect.vue";
 import TypingToggle from "./components/TypingToggle.vue";
@@ -48,6 +49,14 @@ const unlisten: Array<() => void> = [];
 
 const autostart = ref(false);
 const startMinimized = ref(false);
+const update = ref<UpdateInfo | null>(null);
+const checking = ref(false);
+
+async function checkUpdates() {
+  checking.value = true;
+  update.value = await checkForUpdate();
+  checking.value = false;
+}
 
 const languageOptions = [
   { value: "de", label: "Deutsch" },
@@ -128,6 +137,7 @@ onMounted(async () => {
   autostart.value = await isAutostartEnabled();
   startMinimized.value = config.value!.startMinimized;
   if (notifyMode.value !== "off") await ensureNotifyPermission();
+  void checkUpdates();
 });
 onUnmounted(() => unlisten.forEach((fn) => fn()));
 
@@ -169,6 +179,7 @@ function changeLanguage(v: string) {
     <NavSidebar
       :active="activeView"
       :accessibility-ok="accessibilityOk"
+      :update-available="update?.available ?? false"
       @navigate="activeView = $event"
     />
 
@@ -235,7 +246,12 @@ function changeLanguage(v: string) {
           @fix="fixAccessibility"
         />
 
-        <AboutPanel v-else />
+        <AboutPanel
+          v-else
+          :update="update"
+          :checking="checking"
+          @recheck="checkUpdates"
+        />
       </div>
 
       <StatusBar :status="status" :typing="typing" />
