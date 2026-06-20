@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { reactive, watch } from "vue";
+import { computed, reactive, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import type { FormatConfig } from "../lib/tauri";
 import { api } from "../lib/tauri";
+import Select from "./Select.vue";
 
 const props = defineProps<{ format: FormatConfig }>();
 const emit = defineEmits<{ change: [format: FormatConfig] }>();
+
+const { t } = useI18n();
 
 const local = reactive<FormatConfig>({ ...props.format });
 const preview = reactive({ text: "" });
@@ -21,44 +25,65 @@ watch(
   { deep: true },
 );
 refresh();
+
+const caseOptions = computed(() => [
+  { value: "upper", label: t("format.upper") },
+  { value: "lower", label: t("format.lower") },
+]);
+const separatorOptions = computed(() => [
+  { value: "", label: t("format.sepNone") },
+  { value: ":", label: ":" },
+  { value: "-", label: "-" },
+  { value: " ", label: t("format.sepSpace") },
+]);
+const byteOrderOptions = computed(() => [
+  { value: "normal", label: t("format.normal") },
+  { value: "reversed", label: t("format.reversed") },
+]);
+const suffixOptions = computed(() => [
+  { value: "enter", label: t("format.enter") },
+  { value: "tab", label: t("format.tab") },
+  { value: "none", label: t("format.none") },
+]);
 </script>
 
 <template>
   <div class="card">
     <div class="grid">
-      <label>Groß/klein</label>
-      <select v-model="local.case">
-        <option value="upper">GROSS</option>
-        <option value="lower">klein</option>
-      </select>
+      <label>{{ t("format.case") }}</label>
+      <Select
+        :model-value="local.case"
+        :options="caseOptions"
+        @update:model-value="local.case = $event as FormatConfig['case']"
+      />
 
-      <label>Trennzeichen</label>
-      <select v-model="local.separator">
-        <option value="">keins</option>
-        <option value=":">:</option>
-        <option value="-">-</option>
-        <option value=" ">Leerzeichen</option>
-      </select>
+      <label>{{ t("format.separator") }}</label>
+      <Select
+        :model-value="local.separator"
+        :options="separatorOptions"
+        @update:model-value="local.separator = $event"
+      />
 
-      <label>Byte-Reihenfolge</label>
-      <select v-model="local.byteOrder">
-        <option value="normal">normal</option>
-        <option value="reversed">umgekehrt</option>
-      </select>
+      <label>{{ t("format.byteOrder") }}</label>
+      <Select
+        :model-value="local.byteOrder"
+        :options="byteOrderOptions"
+        @update:model-value="local.byteOrder = $event as FormatConfig['byteOrder']"
+      />
 
-      <label>Präfix</label>
-      <input v-model="local.prefix" placeholder="(leer)" />
+      <label>{{ t("format.prefix") }}</label>
+      <input v-model="local.prefix" :placeholder="t('format.prefixPlaceholder')" />
 
-      <label>Abschluss</label>
-      <select v-model="local.suffix">
-        <option value="enter">Enter</option>
-        <option value="tab">Tab</option>
-        <option value="none">keins</option>
-      </select>
+      <label>{{ t("format.trailing") }}</label>
+      <Select
+        :model-value="local.suffix"
+        :options="suffixOptions"
+        @update:model-value="local.suffix = $event as FormatConfig['suffix']"
+      />
     </div>
 
     <div class="preview">
-      <span class="preview-lbl">Vorschau</span>
+      <span class="preview-lbl">{{ t("format.preview") }}</span>
       <code>{{ preview.text }}</code>
     </div>
   </div>
@@ -83,9 +108,8 @@ refresh();
   font-size: 14px;
   color: #5b6478;
 }
-.grid select,
 .grid input {
-  padding: 8px 10px;
+  padding: 9px 11px;
   border: 1px solid #d4d9e6;
   border-radius: 8px;
   font-size: 14px;

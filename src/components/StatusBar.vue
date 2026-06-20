@@ -1,24 +1,26 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import type { ReaderStatus } from "../lib/tauri";
 defineProps<{ status: ReaderStatus | null; typing: boolean }>();
+const { t } = useI18n();
 </script>
 
 <template>
   <footer class="bar">
     <span class="item">
       <span class="dot" :class="status?.kind === 'connected' ? 'on' : 'off'"></span>
-      Leser:
+      {{ t("footer.reader") }}:
       {{
         status?.kind === "connected"
-          ? "verbunden"
+          ? t("footer.connected")
           : status?.kind === "error"
-            ? `Fehler: ${status.message}`
-            : "getrennt"
+            ? `${t("footer.error")}: ${status.message}`
+            : t("footer.disconnected")
       }}
     </span>
     <span class="item">
       <span class="dot" :class="typing ? 'typing' : 'off'"></span>
-      Tippen: {{ typing ? "aktiv" : "aus" }}
+      {{ t("footer.typing") }}: {{ typing ? t("footer.active") : t("footer.off") }}
     </span>
   </footer>
 </template>

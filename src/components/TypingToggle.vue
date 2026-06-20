@@ -1,18 +1,16 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 defineProps<{ enabled: boolean }>();
 defineEmits<{ toggle: [value: boolean] }>();
+const { t } = useI18n();
 </script>
 
 <template>
   <button class="toggle" :class="{ on: enabled }" @click="$emit('toggle', !enabled)">
     <span class="dot"></span>
     <span class="text">
-      <span class="title">{{ enabled ? "Tippen aktiv" : "Tippen aus" }}</span>
-      <span class="hint">{{
-        enabled
-          ? "Gescannte UID wird ins fokussierte Feld getippt."
-          : "Klicken zum Scharfschalten."
-      }}</span>
+      <span class="title">{{ enabled ? t("typing.onTitle") : t("typing.offTitle") }}</span>
+      <span class="hint">{{ enabled ? t("typing.onHint") : t("typing.offHint") }}</span>
     </span>
   </button>
 </template>

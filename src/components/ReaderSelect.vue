@@ -1,25 +1,33 @@
 <script setup lang="ts">
-defineProps<{ readers: string[]; selected: string | null }>();
-defineEmits<{ select: [name: string | null]; rescan: [] }>();
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import Select from "./Select.vue";
+
+const props = defineProps<{ readers: string[]; selected: string | null }>();
+const emit = defineEmits<{ select: [name: string | null]; rescan: [] }>();
+
+const { t } = useI18n();
+
+const options = computed(() => [
+  { value: "", label: t("reader.none") },
+  ...props.readers.map((r) => ({ value: r, label: r })),
+]);
 </script>
 
 <template>
   <div class="card">
-    <label class="lbl">Aktiver Leser</label>
+    <label class="lbl">{{ t("reader.active") }}</label>
     <div class="row">
-      <select
-        class="select"
-        :value="selected ?? ''"
-        @change="$emit('select', ($event.target as HTMLSelectElement).value || null)"
-      >
-        <option value="">— kein Leser gewählt —</option>
-        <option v-for="r in readers" :key="r" :value="r">{{ r }}</option>
-      </select>
-      <button class="btn" @click="$emit('rescan')">Aktualisieren</button>
+      <div class="grow">
+        <Select
+          :model-value="selected ?? ''"
+          :options="options"
+          @update:model-value="emit('select', $event || null)"
+        />
+      </div>
+      <button class="btn" @click="emit('rescan')">{{ t("reader.refresh") }}</button>
     </div>
-    <p v-if="!readers.length" class="empty">
-      Kein PC/SC-Leser gefunden. Leser anstecken und „Aktualisieren".
-    </p>
+    <p v-if="!readers.length" class="empty">{{ t("reader.empty") }}</p>
   </div>
 </template>
 
@@ -41,14 +49,9 @@ defineEmits<{ select: [name: string | null]; rescan: [] }>();
   display: flex;
   gap: 10px;
 }
-.select {
+.grow {
   flex: 1;
   min-width: 0;
-  padding: 9px 11px;
-  border: 1px solid #d4d9e6;
-  border-radius: 8px;
-  font-size: 14px;
-  background: #fff;
 }
 .btn {
   padding: 9px 14px;
@@ -57,6 +60,7 @@ defineEmits<{ select: [name: string | null]; rescan: [] }>();
   background: #f4f5fa;
   font-size: 14px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .btn:hover {
   background: #e9ecf6;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   api,
   onScan,
@@ -11,7 +12,8 @@ import {
   type ScanRecord,
 } from "./lib/tauri";
 import { pushScan } from "./lib/scanLog";
-import { VIEW_TITLES, type NavView } from "./lib/nav";
+import { type NavView } from "./lib/nav";
+import { setLocale, type Locale } from "./i18n";
 import NavSidebar from "./components/NavSidebar.vue";
 import ReaderSelect from "./components/ReaderSelect.vue";
 import TypingToggle from "./components/TypingToggle.vue";
@@ -19,11 +21,15 @@ import FormatSettings from "./components/FormatSettings.vue";
 import ScanLog from "./components/ScanLog.vue";
 import StatusBar from "./components/StatusBar.vue";
 import AccessibilityPanel from "./components/AccessibilityPanel.vue";
+import Toggle from "./components/Toggle.vue";
+import Select from "./components/Select.vue";
 import {
   enable as enableAutostart,
   disable as disableAutostart,
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
+
+const { t, locale } = useI18n();
 
 const config = ref<Config | null>(null);
 const readers = ref<string[]>([]);
@@ -37,12 +43,10 @@ const unlisten: Array<() => void> = [];
 const autostart = ref(false);
 const startMinimized = ref(false);
 
-const SUBTITLES: Record<NavView, string> = {
-  scanner: "Leser wählen und das Tippen scharfschalten.",
-  log: "Alle gescannten UIDs, neueste zuerst.",
-  options: "Ausgabeformat und Startverhalten.",
-  accessibility: "Berechtigung zum Tippen in andere Apps.",
-};
+const languageOptions = [
+  { value: "de", label: "Deutsch" },
+  { value: "en", label: "English" },
+];
 
 onMounted(async () => {
   config.value = await api.getConfig();
@@ -89,6 +93,9 @@ function toggleStartMinimized(v: boolean) {
   startMinimized.value = v;
   api.setStartMinimized(v);
 }
+function changeLanguage(v: string) {
+  setLocale(v as Locale);
+}
 </script>
 
 <template>
@@ -101,8 +108,8 @@ function toggleStartMinimized(v: boolean) {
 
     <div class="content">
       <header class="head">
-        <h1>{{ VIEW_TITLES[activeView] }}</h1>
-        <p>{{ SUBTITLES[activeView] }}</p>
+        <h1>{{ t(`view.${activeView}Title`) }}</h1>
+        <p>{{ t(`view.${activeView}Sub`) }}</p>
       </header>
 
       <div class="body">
@@ -120,32 +127,32 @@ function toggleStartMinimized(v: boolean) {
 
         <template v-else-if="activeView === 'options'">
           <FormatSettings :format="config.format" @change="changeFormat" />
-          <fieldset class="options">
-            <legend>Start</legend>
-            <label>
-              <input
-                type="checkbox"
-                :checked="autostart"
-                @change="toggleAutostart(($event.target as HTMLInputElement).checked)"
+
+          <div class="card opt-card">
+            <span class="opt-title">{{ t("options.startup") }}</span>
+            <div class="opt-row">
+              <Toggle :model-value="autostart" @update:model-value="toggleAutostart" />
+              <span>{{ t("options.autostart") }}</span>
+            </div>
+            <div class="opt-row">
+              <Toggle :model-value="startMinimized" @update:model-value="toggleStartMinimized" />
+              <span>{{ t("options.startMinimized") }}</span>
+            </div>
+          </div>
+
+          <div class="card opt-card">
+            <span class="opt-title">{{ t("options.language") }}</span>
+            <div class="lang">
+              <Select
+                :model-value="locale"
+                :options="languageOptions"
+                @update:model-value="changeLanguage"
               />
-              Autostart beim Systemstart
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                :checked="startMinimized"
-                @change="toggleStartMinimized(($event.target as HTMLInputElement).checked)"
-              />
-              Minimiert starten
-            </label>
-          </fieldset>
+            </div>
+          </div>
         </template>
 
-        <AccessibilityPanel
-          v-else
-          :ok="accessibilityOk"
-          @fix="fixAccessibility"
-        />
+        <AccessibilityPanel v-else :ok="accessibilityOk" @fix="fixAccessibility" />
       </div>
 
       <StatusBar :status="status" :typing="typing" />
@@ -197,23 +204,26 @@ body {
   gap: 18px;
   align-content: start;
 }
-.options {
-  display: grid;
-  gap: 10px;
-  border: 1px solid #e4e7f0;
-  border-radius: 10px;
-  padding: 14px 16px;
+.opt-card {
   background: #fff;
+  border: 1px solid #e4e7f0;
+  border-radius: 12px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
 }
-.options legend {
-  font-weight: 600;
+.opt-title {
   font-size: 13px;
-  padding: 0 6px;
+  font-weight: 600;
+  color: #5b6478;
 }
-.options label {
+.opt-row {
   display: flex;
-  gap: 9px;
   align-items: center;
+  gap: 12px;
   font-size: 14px;
+}
+.lang {
+  max-width: 220px;
 }
 </style>

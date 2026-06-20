@@ -1,29 +1,27 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 defineProps<{ ok: boolean }>();
 defineEmits<{ fix: [] }>();
+const { t } = useI18n();
 </script>
 
 <template>
   <section class="panel">
     <div class="status" :class="ok ? 'ok' : 'warn'">
       <span class="dot"></span>
-      <span v-if="ok">Zugriff erteilt – oder auf dieser Plattform nicht erforderlich.</span>
-      <span v-else>Bedienungshilfen-Zugriff fehlt – das Tippen in andere Apps funktioniert noch nicht.</span>
+      <span>{{ ok ? t("a11y.ok") : t("a11y.missing") }}</span>
     </div>
 
-    <p class="muted">
-      Auf macOS braucht die App den Zugriff auf die <strong>Bedienungshilfen</strong>
-      (Accessibility API), um Tastatureingaben an andere Programme zu senden.
-    </p>
+    <p class="muted">{{ t("a11y.intro") }}</p>
 
     <ol class="steps">
-      <li>Systemeinstellungen → <strong>Datenschutz &amp; Sicherheit</strong> → <strong>Bedienungshilfen</strong></li>
-      <li>Liste entsperren und <strong>NFC Keyboard Emulator</strong> aktivieren</li>
-      <li>App ggf. neu starten</li>
+      <li>{{ t("a11y.step1") }}</li>
+      <li>{{ t("a11y.step2") }}</li>
+      <li>{{ t("a11y.step3") }}</li>
     </ol>
 
     <div class="actions">
-      <button class="primary" @click="$emit('fix')">Einstellungen öffnen &amp; erneut prüfen</button>
+      <button class="primary" @click="$emit('fix')">{{ t("a11y.button") }}</button>
     </div>
   </section>
 </template>

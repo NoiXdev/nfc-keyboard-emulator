@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { NAV_GROUPS, type NavView } from "../lib/nav";
 
 defineProps<{ active: NavView; accessibilityOk: boolean }>();
 defineEmits<{ navigate: [view: NavView] }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
@@ -27,26 +30,26 @@ defineEmits<{ navigate: [view: NavView] }>();
     </div>
 
     <nav>
-      <div v-for="group in NAV_GROUPS" :key="group.label" class="group">
-        <p class="group-label">{{ group.label }}</p>
+      <div v-for="group in NAV_GROUPS" :key="group.groupKey" class="group">
+        <p class="group-label">{{ t(`nav.${group.groupKey}`) }}</p>
         <button
           v-for="item in group.items"
-          :key="item.key"
+          :key="item"
           class="item"
-          :class="{ active: active === item.key }"
-          @click="$emit('navigate', item.key)"
+          :class="{ active: active === item }"
+          @click="$emit('navigate', item)"
         >
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <template v-if="item.key === 'scanner'">
+            <template v-if="item === 'scanner'">
               <rect x="3" y="6" width="12" height="12" rx="2" />
               <path d="M18 9a4 4 0 0 1 0 6" />
             </template>
-            <template v-else-if="item.key === 'log'">
+            <template v-else-if="item === 'log'">
               <line x1="4" y1="7" x2="20" y2="7" />
               <line x1="4" y1="12" x2="20" y2="12" />
               <line x1="4" y1="17" x2="14" y2="17" />
             </template>
-            <template v-else-if="item.key === 'options'">
+            <template v-else-if="item === 'options'">
               <line x1="4" y1="8" x2="20" y2="8" />
               <circle cx="9" cy="8" r="2.2" />
               <line x1="4" y1="16" x2="20" y2="16" />
@@ -57,8 +60,12 @@ defineEmits<{ navigate: [view: NavView] }>();
               <path d="M5 9h14M12 9v6M9 21l3-6 3 6" />
             </template>
           </svg>
-          <span>{{ item.label }}</span>
-          <span v-if="item.key === 'accessibility' && !accessibilityOk" class="badge" title="Bedienungshilfen fehlen"></span>
+          <span>{{ t(`nav.${item}`) }}</span>
+          <span
+            v-if="item === 'accessibility' && !accessibilityOk"
+            class="badge"
+            :title="t('nav.accessibilityMissing')"
+          ></span>
         </button>
       </div>
     </nav>

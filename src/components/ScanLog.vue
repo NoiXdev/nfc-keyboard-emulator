@@ -1,26 +1,28 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import type { ScanRecord } from "../lib/tauri";
 defineProps<{ scans: ScanRecord[] }>();
 defineEmits<{ export: [] }>();
+const { t } = useI18n();
 </script>
 
 <template>
   <div class="wrap">
     <div class="toolbar">
-      <span class="count">{{ scans.length }} Scan{{ scans.length === 1 ? "" : "s" }}</span>
-      <button class="btn" data-test="export" @click="$emit('export')">CSV exportieren</button>
+      <span class="count">{{ scans.length }} {{ t("log.scans") }}</span>
+      <button class="btn" data-test="export" @click="$emit('export')">{{ t("log.export") }}</button>
     </div>
 
     <div class="card">
       <table>
         <thead>
           <tr>
-            <th>Zeit</th>
-            <th>Leser</th>
-            <th>UID</th>
-            <th>Länge</th>
-            <th>Getippt</th>
-            <th>Status</th>
+            <th>{{ t("log.time") }}</th>
+            <th>{{ t("log.reader") }}</th>
+            <th>{{ t("log.uid") }}</th>
+            <th>{{ t("log.length") }}</th>
+            <th>{{ t("log.typed") }}</th>
+            <th>{{ t("log.status") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -30,11 +32,11 @@ defineEmits<{ export: [] }>();
             <td class="mono">{{ s.uidHex }}</td>
             <td>{{ s.uidLength }}</td>
             <td>{{ s.typed ? "✓" : "—" }}</td>
-            <td><span class="status" :class="s.status">{{ s.status }}</span></td>
+            <td><span class="status" :class="s.status">{{ t(`status.${s.status}`) }}</span></td>
           </tr>
         </tbody>
       </table>
-      <p v-if="!scans.length" class="empty">Noch keine Scans. Karte auf den Leser legen.</p>
+      <p v-if="!scans.length" class="empty">{{ t("log.empty") }}</p>
     </div>
   </div>
 </template>
