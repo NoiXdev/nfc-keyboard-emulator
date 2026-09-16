@@ -10,6 +10,7 @@ pub struct PcscReader {
     selected_state: State,
     card_present: bool,
     connected_emitted: bool,
+    last_error: Option<String>,
 }
 
 impl PcscReader {
@@ -21,7 +22,39 @@ impl PcscReader {
             selected_state: State::UNAWARE,
             card_present: false,
             connected_emitted: false,
+            last_error: None,
         })
+    }
+
+    fn reset_states(&mut self) {
+        self.pnp_state = State::UNAWARE;
+        self.selected_state = State::UNAWARE;
+        self.card_present = false;
+        self.connected_emitted = false;
+    }
+
+    /// A dead context never recovers on its own - every later call fails instantly,
+    /// which is how an RDP session restarting the smart card service used to leave
+    /// the app spinning until restart (issue #1). Re-establish it so the app comes
+    /// back by itself, and report the error only when it changes rather than on
+    /// every cycle.
+    fn handle_error(&mut self, e: pcsc::Error) -> Option<ReaderEvent> {
+        if matches!(
+            e,
+            pcsc::Error::NoService | pcsc::Error::ServiceStopped | pcsc::Error::InvalidHandle
+        ) {
+            if let Ok(ctx) = Context::establish(Scope::User) {
+                self.ctx = ctx;
+                self.reset_states();
+            }
+        }
+
+        let message = e.to_string();
+        if self.last_error.as_deref() == Some(message.as_str()) {
+            return None;
+        }
+        self.last_error = Some(message.clone());
+        Some(ReaderEvent::Status(ReaderStatus::Error { message }))
     }
 
     fn read_uid(&self, reader: &CString) -> Option<Vec<u8>> {
@@ -65,6 +98,7 @@ impl ReaderBackend for PcscReader {
             let mut states = vec![ReaderState::new(PNP_NOTIFICATION(), self.pnp_state)];
             match self.ctx.get_status_change(timeout, &mut states) {
                 Ok(()) => {
+                    self.last_error = None;
                     let event_state = states[0].event_state();
                     self.pnp_state = event_state;
                     if event_state.contains(State::CHANGED) {
@@ -72,12 +106,8 @@ impl ReaderBackend for PcscReader {
                         events.push(ReaderEvent::ReadersChanged(names));
                     }
                 }
-                Err(pcsc::Error::Timeout) => {}
-                Err(e) => {
-                    events.push(ReaderEvent::Status(ReaderStatus::Error {
-                        message: e.to_string(),
-                    }));
-                }
+                Err(pcsc::Error::Timeout) => self.last_error = None,
+                Err(e) => events.extend(self.handle_error(e)),
             }
             return events;
         };
@@ -88,12 +118,13 @@ impl ReaderBackend for PcscReader {
         ];
 
         match self.ctx.get_status_change(timeout, &mut states) {
-            Ok(()) => {}
-            Err(pcsc::Error::Timeout) => return events,
+            Ok(()) => self.last_error = None,
+            Err(pcsc::Error::Timeout) => {
+                self.last_error = None;
+                return events;
+            }
             Err(e) => {
-                events.push(ReaderEvent::Status(ReaderStatus::Error {
-                    message: e.to_string(),
-                }));
+                events.extend(self.handle_error(e));
                 return events;
             }
         }

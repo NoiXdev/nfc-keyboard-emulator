@@ -6,7 +6,16 @@ use crate::typer::Typer;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// A backend is expected to block for up to its poll timeout. A broken one can
+/// return instantly instead and turn this loop into a spin - which is what a dead
+/// PC/SC context did on Windows when an RDP session restarted the smart card
+/// service (issue #1): ~5M error events per second, a burnt core, and a flooded
+/// UI. The floor below makes that impossible for any backend, while card reads
+/// still pass through without added latency.
+const POLL_TIMEOUT: Duration = Duration::from_millis(400);
+const MIN_CYCLE: Duration = Duration::from_millis(50);
 
 pub fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
@@ -34,7 +43,13 @@ pub fn run_worker(mut deps: WorkerDeps) {
     deps.backend.set_selected(selected);
 
     loop {
-        for ev in deps.backend.poll(Duration::from_millis(400)) {
+        let cycle_start = Instant::now();
+        let events = deps.backend.poll(POLL_TIMEOUT);
+        let had_card_event = events
+            .iter()
+            .any(|e| matches!(e, ReaderEvent::Scan { .. } | ReaderEvent::ReadError { .. }));
+
+        for ev in events {
             match ev {
                 ReaderEvent::Scan { reader, uid } => {
                     let cfg = deps.config.lock().unwrap().clone();
@@ -61,6 +76,12 @@ pub fn run_worker(mut deps: WorkerDeps) {
                 WorkerCommand::Shutdown => return,
             }
         }
+
+        if !had_card_event {
+            if let Some(rest) = MIN_CYCLE.checked_sub(cycle_start.elapsed()) {
+                std::thread::sleep(rest);
+            }
+        }
     }
 }
 
@@ -76,6 +97,7 @@ mod tests {
     struct TestSink {
         scans: Arc<Mutex<Vec<ScanRecord>>>,
         readers: Arc<Mutex<Vec<Vec<String>>>>,
+        statuses: Arc<Mutex<Vec<ReaderStatus>>>,
     }
 
     impl WorkerSink for TestSink {
@@ -85,7 +107,25 @@ mod tests {
         fn readers_changed(&self, readers: &[String]) {
             self.readers.lock().unwrap().push(readers.to_vec());
         }
-        fn status(&self, _status: &ReaderStatus) {}
+        fn status(&self, status: &ReaderStatus) {
+            self.statuses.lock().unwrap().push(status.clone());
+        }
+    }
+
+    /// Stands in for a PC/SC context that has died: `get_status_change` then fails
+    /// immediately instead of waiting out the timeout.
+    struct InstantErrors;
+
+    impl ReaderBackend for InstantErrors {
+        fn list_readers(&mut self) -> Vec<String> {
+            Vec::new()
+        }
+        fn set_selected(&mut self, _name: Option<String>) {}
+        fn poll(&mut self, _timeout: Duration) -> Vec<ReaderEvent> {
+            vec![ReaderEvent::Status(ReaderStatus::Error {
+                message: "SCARD_E_SERVICE_STOPPED".into(),
+            })]
+        }
     }
 
     #[test]
@@ -115,5 +155,33 @@ mod tests {
         assert_eq!(scans.len(), 1);
         assert_eq!(scans[0].uid_hex, "04A1B2C3");
         assert_eq!(scans[0].status, ScanStatus::Ok);
+    }
+
+    #[test]
+    fn a_failing_backend_does_not_spin_the_worker() {
+        let sink = TestSink::default();
+        let statuses = sink.statuses.clone();
+        let (tx, ctrl_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            let _ = tx.send(WorkerCommand::Shutdown);
+        });
+
+        let start = Instant::now();
+        run_worker(WorkerDeps {
+            backend: Box::new(InstantErrors),
+            sink: Box::new(sink),
+            typer: Box::new(MockTyper::ok()),
+            config: Arc::new(Mutex::new(Config::default())),
+            typing_enabled: Arc::new(AtomicBool::new(false)),
+            ctrl_rx,
+        });
+
+        // Without the cycle floor this ran at ~5,000,000 cycles per second.
+        let per_second = statuses.lock().unwrap().len() as f64 / start.elapsed().as_secs_f64();
+        assert!(
+            per_second < 100.0,
+            "worker spun at {per_second:.0} cycles/s - the cycle floor is gone"
+        );
     }
 }
