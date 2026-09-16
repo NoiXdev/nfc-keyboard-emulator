@@ -59,7 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: "src-tauri" }
       - run: npm ci
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
       - name: Single instance, macOS (regression check for #2)
         if: runner.os == 'macOS'
         run: scripts/check-single-instance.sh
