@@ -96,6 +96,13 @@ pub fn run() {
             let show = MenuItem::with_id(app, "show", "Anzeigen", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
+            // macOS draws the tray icon as a template image (see below), which uses
+            // only the alpha channel - so it needs a transparent glyph rather than the
+            // opaque tile the Windows tray expects.
+            #[cfg(target_os = "macos")]
+            let tray_icon =
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?;
+            #[cfg(not(target_os = "macos"))]
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
             let tray = TrayIconBuilder::new().icon(tray_icon).menu(&menu);
             // macOS: Template-Icon passt sich Hell/Dunkel an (Shadowing statt `mut`,
