@@ -41,6 +41,8 @@ every scanned card UID is entered for you — exactly as if you had typed it.
 - **Live scan log** — every scan with timestamp, reader, UID and status; export to CSV.
 - **Configurable output** — upper/lower case, separators, byte order, prefix; live preview.
 - **Tray + autostart** — closes to the system tray; optional launch on login.
+- **Single instance** — a second launch just brings the running app back into focus,
+  so a card is never read (and typed) twice.
 - **Local only** — no network access; the card UID never leaves your machine.
 
 ## Supported hardware
