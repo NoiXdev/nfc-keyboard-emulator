@@ -60,6 +60,9 @@ jobs:
         with: { workspaces: "src-tauri" }
       - run: npm ci
       - uses: tauri-apps/tauri-action@v0
-      - name: Single instance (regression check for #2)
+      - name: Single instance, macOS (regression check for #2)
         if: runner.os == 'macOS'
         run: scripts/check-single-instance.sh
+      - name: Single instance, Windows (regression check for #2)
+        if: runner.os == 'Windows'
+        run: node scripts/check-single-instance.mjs
