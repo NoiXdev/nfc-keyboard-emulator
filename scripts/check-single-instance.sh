@@ -22,6 +22,15 @@ EXE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info
 BIN="$APP/Contents/MacOS/$EXE"
 
 count() { pgrep -f "$BIN" | wc -l | tr -d ' '; }
+
+# A superseded instance has to boot far enough to reach the guard before it can
+# hand over and exit, which on a cold CI runner takes well over the ~1s it takes
+# on a warm desktop. So poll for the expected count instead of guessing a fixed
+# settle time - a real regression never reaches it and fails on the timeout.
+settle() { # settle <wanted count>
+  local deadline=$((SECONDS + 30))
+  while [[ "$(count)" != "$1" && $SECONDS -lt $deadline ]]; do sleep 0.25; done
+}
 cleanup() { pkill -f "$BIN" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
@@ -43,7 +52,7 @@ expect() { # expect <count> <what>
 }
 
 open "$APP"
-sleep 4
+settle 1
 if [[ "$(count)" == "0" ]]; then
   # No window server (headless agent, locked-out CI runner): the app cannot come
   # up at all, which says nothing about single-instance behaviour. Skip loudly
@@ -54,11 +63,11 @@ fi
 expect 1 "after launch"
 
 "$BIN" >/dev/null 2>&1 &
-sleep 4
+settle 1
 expect 1 "after direct binary exec (autostart path)"
 
 open -n "$APP"
-sleep 4
+settle 1
 expect 1 "after forced 'open -n'"
 
 exit "$fail"

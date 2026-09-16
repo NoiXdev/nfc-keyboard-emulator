@@ -11,7 +11,9 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 const OUT_DIR = "src-tauri/target/release";
-const SETTLE_MS = 4000;
+const SETTLE_TIMEOUT_MS = 30000;
+const STARTUP_GRACE_MS = 4000;
+const POLL_MS = 250;
 
 // The release binary is named after the cargo bin, not the productName - but the
 // bundler has been known to rename it, so try both rather than fail on a path.
@@ -37,27 +39,38 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function launch() {
   const child = spawn(target, { stdio: "ignore" });
-  const entry = { child, exited: false };
-  child.on("exit", () => (entry.exited = true));
-  child.on("error", () => (entry.exited = true));
+  const entry = { exited: false, code: null, child };
+  child.on("exit", (code) => Object.assign(entry, { exited: true, code }));
+  child.on("error", () => Object.assign(entry, { exited: true, code: "spawn error" }));
   started.push(entry);
 }
 
 const alive = () => started.filter((e) => !e.exited).length;
 
-let failed = false;
-function expect(want, what) {
-  const got = alive();
-  if (got === want) {
-    console.log(`ok   - ${what}: ${got} instance(s)`);
-  } else {
-    console.log(`FAIL - ${what}: expected ${want}, got ${got}`);
-    failed = true;
+// A superseded instance has to boot far enough to reach the guard before it can
+// hand over and exit, which on a cold CI runner takes well over the ~1s it takes
+// on a warm desktop. So poll for the expected count instead of guessing a fixed
+// settle time - a real regression never reaches it and fails on the timeout.
+async function settle(want) {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (alive() === want) return;
+    if (started.every((e) => e.exited)) return;
+    await sleep(POLL_MS);
   }
 }
 
+let failed = false;
+function check(ok, message) {
+  console.log(`${ok ? "ok  " : "FAIL"} - ${message}`);
+  if (!ok) failed = true;
+}
+
 launch();
-await sleep(SETTLE_MS);
+// Not settle(): a freshly spawned process counts as alive until its exit event
+// fires, so polling for "1 alive" would return before a failed start is visible.
+// Give it a fixed moment to fall over instead.
+await sleep(STARTUP_GRACE_MS);
 if (alive() === 0) {
   // No desktop session or no WebView2 runtime: the app cannot come up at all,
   // which says nothing about single-instance behaviour. Skip loudly rather than
@@ -65,15 +78,25 @@ if (alive() === 0) {
   console.log("skip - app did not start, no desktop session available");
   process.exit(0);
 }
-expect(1, "after launch");
+check(alive() === 1, `after launch: ${alive()} instance(s)`);
 
 launch();
-await sleep(SETTLE_MS);
-expect(1, "after second launch (shortcut while autostarted)");
+await settle(1);
+check(alive() === 1, `after second launch (shortcut while autostarted): ${alive()} instance(s)`);
 
 launch();
-await sleep(SETTLE_MS);
-expect(1, "after third launch");
+await settle(1);
+check(alive() === 1, `after third launch: ${alive()} instance(s)`);
+
+// Distinguishes "deferred to the running instance" from "crashed on startup" -
+// both leave one process behind, only the first one is the behaviour we want.
+const codes = started.filter((e) => e.exited).map((e) => e.code);
+if (codes.length) {
+  check(
+    codes.every((c) => c === 0),
+    `superseded instances exited cleanly (code ${codes.join(", ")})`,
+  );
+}
 
 for (const { child, exited } of started) if (!exited) child.kill();
 process.exit(failed ? 1 : 0);
