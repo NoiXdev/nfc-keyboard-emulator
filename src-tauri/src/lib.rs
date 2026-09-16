@@ -51,9 +51,22 @@ impl WorkerSink for TauriSink {
     }
 }
 
+fn focus_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must stay first: the plugin exits a second instance from its own setup
+        // hook, which has to happen before ours claims the PC/SC reader.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_main_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -91,12 +104,7 @@ pub fn run() {
             let tray = tray.icon_as_template(true);
             let _tray = tray
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
+                    "show" => focus_main_window(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -159,6 +167,19 @@ pub fn run() {
             commands::check_accessibility,
             commands::open_accessibility_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        // macOS: a dock click must bring the tray-hidden window back, otherwise
+        // the app looks dead and users start it a second time. Underscore names
+        // keep the closure warning-free on non-macOS.
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = _event
+            {
+                focus_main_window(_app);
+            }
+        });
 }
