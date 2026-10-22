@@ -106,6 +106,15 @@ NFC_HW_TEST=1 cargo test --manifest-path src-tauri/Cargo.toml reader_pcsc::hw_te
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the manual pre-release checklist and commit
 conventions.
 
+
+## Community & Support
+
+Questions, ideas, or running into something? Join the NoiXdev Discord — the
+fastest way to get help and talk to us and other users.
+
+[![Join our Discord](https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/sHcvJfXhq)
+
+
 ## License
 
 [MIT](LICENSE) © 2026 NoiXdev
