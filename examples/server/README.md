@@ -14,7 +14,9 @@ TOKEN=dev node server.mjs   # PORT defaults to 8787
 The server listens on `127.0.0.1` only, so it is reachable from this computer but not
 from the network. Set `HOST` (for example `HOST=0.0.0.0`) to listen elsewhere, and put
 it behind TLS if you do: the token is sent in clear text over plain `http://` and
-`ws://`.
+`ws://`. With `HOST=0.0.0.0`, open the demo page as `http://localhost:8787/` on the
+machine running the server: opened through the computer's network address, the page's
+socket is rejected by the origin check.
 
 Open <http://localhost:8787/> for the demo page, then enter these in the app's
 Server view (use the same token everywhere):

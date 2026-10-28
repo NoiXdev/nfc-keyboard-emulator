@@ -143,17 +143,28 @@ function guard(ws, who) {
   });
 }
 
+// The app can no longer answer the requests it was sent: tell the browsers
+// still waiting.
+function endPending() {
+  for (const [requestId, owner] of pending) {
+    send(owner, { type: "scan_request_ended", requestId, reason: "app_not_connected" });
+  }
+  pending.clear();
+}
+
 function onAppConnected(ws) {
   guard(ws, "app");
-  app?.close(); // a newer connection replaces the old one
+  if (app) {
+    // A newer connection replaces the old one; its requests die with it.
+    endPending();
+    app.close();
+  }
   app = ws;
   ws.on("close", () => {
-    if (app === ws) app = null;
-    // The app can no longer answer: tell the browsers still waiting.
-    for (const [requestId, owner] of pending) {
-      send(owner, { type: "scan_request_ended", requestId, reason: "app_not_connected" });
-    }
-    pending.clear();
+    // A replaced socket closes late; the requests now belong to the newer one.
+    if (app !== ws) return;
+    app = null;
+    endPending();
   });
   ws.on("message", (data) => {
     const msg = parse(data);
