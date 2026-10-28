@@ -5,7 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio::time::{interval_at, timeout};
+use tokio::time::{interval_at, timeout, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::{HeaderValue, AUTHORIZATION};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -26,6 +26,8 @@ use crate::scan::{DeliveryTarget, ScanRecord};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// A graceful close must not hold up a reconnect or shutdown.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
+/// A write the peer does not take within this time counts as a dead connection.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -67,10 +69,14 @@ pub trait WsEvents: Send + Sync + 'static {
     fn request_armed(&self, request_id: &str);
 }
 
-/// Keepalive, stability and request-expiry periods; injectable so tests do not wait 30 s.
+/// Keepalive, dead-peer, stability and request-expiry periods; injectable so tests do not
+/// wait 30 s.
 #[derive(Debug, Clone, Copy)]
 struct WsTimings {
     ping: Duration,
+    /// How long the peer may stay silent beyond one ping interval before the session
+    /// counts as dead.
+    grace: Duration,
     /// A session that stayed up this long resets the backoff and the "lost" announcement.
     stable: Duration,
     tick: Duration,
@@ -80,6 +86,7 @@ impl Default for WsTimings {
     fn default() -> Self {
         Self {
             ping: Duration::from_secs(30),
+            grace: Duration::from_secs(10),
             stable: Duration::from_secs(30),
             tick: Duration::from_secs(1),
         }
@@ -381,7 +388,11 @@ impl Connection {
 
         let start = tokio::time::Instant::now();
         let mut ping = interval_at(start + self.timings.ping, self.timings.ping);
+        ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut tick = interval_at(start + self.timings.tick, self.timings.tick);
+        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        // Any inbound frame, pongs included, proves the peer is still there.
+        let mut last_heard = start;
         loop {
             let event = tokio::select! {
                 frame = ws.next() => Event::Frame(frame),
@@ -389,6 +400,9 @@ impl Connection {
                 _ = ping.tick() => Event::Ping,
                 _ = tick.tick() => Event::Tick,
             };
+            if let Event::Frame(Some(Ok(_))) = event {
+                last_heard = tokio::time::Instant::now();
+            }
             let result = match event {
                 Event::Frame(Some(Ok(Message::Text(text)))) => {
                     self.on_server_message(ws, text.as_str(), origin).await
@@ -401,6 +415,10 @@ impl Connection {
                 // Binary, ping and pong frames; tungstenite answers pings itself.
                 Event::Frame(Some(Ok(_))) => Ok(()),
                 Event::Frame(Some(Err(e))) => Err(classify(&e, origin)),
+                // A half-open socket (sleep, network change) never errors on its own.
+                Event::Ping if last_heard.elapsed() > self.timings.ping + self.timings.grace => {
+                    Err(no_response(origin))
+                }
                 Event::Ping => send_frame(ws, Message::Ping(Default::default()), origin).await,
                 Event::Tick => match self.slot.expire(Instant::now()) {
                     Some(id) => self.end_request(ws, id, EndReason::Timeout, origin).await,
@@ -642,7 +660,17 @@ async fn send(ws: &mut WsStream, msg: &ClientMessage, origin: &str) -> Result<()
 }
 
 async fn send_frame(ws: &mut WsStream, frame: Message, origin: &str) -> Result<(), DeliveryError> {
-    ws.send(frame).await.map_err(|e| classify(&e, origin))
+    match timeout(SEND_TIMEOUT, ws.send(frame)).await {
+        Ok(result) => result.map_err(|e| classify(&e, origin)),
+        Err(_) => Err(no_response(origin)),
+    }
+}
+
+/// The peer stopped answering pings or taking writes.
+fn no_response(origin: &str) -> DeliveryError {
+    DeliveryError::Unreachable {
+        message: format!("no response ({origin})"),
+    }
 }
 
 async fn close(ws: &mut WsStream) {
@@ -706,6 +734,7 @@ mod tests {
 
     const TEST_TIMINGS: WsTimings = WsTimings {
         ping: Duration::from_secs(30),
+        grace: Duration::from_secs(10),
         stable: Duration::from_secs(30),
         tick: Duration::from_millis(100),
     };
@@ -1141,6 +1170,57 @@ mod tests {
         let _conn = server.accept().await;
         assert!(closed.elapsed() < Duration::from_millis(2500));
         assert_eq!(lost_count(&c), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn silent_peer_is_dropped_and_reconnected() {
+        let mut server = TestServer::start(None).await;
+        let timings = WsTimings {
+            ping: Duration::from_millis(100),
+            grace: Duration::from_millis(100),
+            ..TEST_TIMINGS
+        };
+        let c = start_with(target(&server.url, "t", true, false), timings);
+        // Never read again, so pings stay unanswered.
+        let mut silent = server.accept().await;
+        silent.recv().await; // hello
+        wait_until("dropped", Duration::from_secs(3), || {
+            matches!(state(&c), WsState::Reconnecting { .. })
+        })
+        .await;
+        let WsState::Reconnecting { error, lost } = state(&c) else {
+            unreachable!()
+        };
+        let origin = server.url.trim_end_matches("/ws");
+        assert_eq!(
+            error,
+            DeliveryError::Unreachable {
+                message: format!("no response ({origin})")
+            }
+        );
+        assert!(lost);
+
+        let mut conn = server.accept().await;
+        assert_eq!(conn.recv().await["type"], "hello");
+        wait_connected(&c).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answered_pings_keep_the_session() {
+        let mut server = TestServer::start(None).await;
+        let timings = WsTimings {
+            ping: Duration::from_millis(100),
+            grace: Duration::from_millis(100),
+            ..TEST_TIMINGS
+        };
+        let c = start_with(target(&server.url, "t", true, false), timings);
+        let mut conn = server.accept().await;
+        conn.recv().await; // hello
+
+        // Reading lets the server answer every ping with a pong.
+        conn.expect_silence(Duration::from_millis(800)).await;
+        assert_eq!(state(&c), WsState::Connected);
+        assert_eq!(server.attempts(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
