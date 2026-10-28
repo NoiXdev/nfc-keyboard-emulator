@@ -53,12 +53,17 @@ impl IntegrationConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+// The names are the `kind` tags the frontend translates.
+#[allow(clippy::enum_variant_names)]
 pub enum ConfigError {
     InvalidHttpUrl,
     InvalidWsUrl,
+    InvalidHttpToken,
+    InvalidWsToken,
 }
 
-/// Trims all strings and validates the URLs. An empty URL is valid (target not configured).
+/// Trims all strings and validates the URLs and tokens. An empty URL is valid (target not
+/// configured).
 pub fn normalize(mut cfg: IntegrationConfig) -> Result<IntegrationConfig, ConfigError> {
     for s in [
         &mut cfg.device_name,
@@ -75,7 +80,19 @@ pub fn normalize(mut cfg: IntegrationConfig) -> Result<IntegrationConfig, Config
     if !valid_url(&cfg.ws.url, &["ws", "wss"]) {
         return Err(ConfigError::InvalidWsUrl);
     }
+    if !valid_token(&cfg.http.token) {
+        return Err(ConfigError::InvalidHttpToken);
+    }
+    if !valid_token(&cfg.ws.token) {
+        return Err(ConfigError::InvalidWsToken);
+    }
     Ok(cfg)
+}
+
+/// A token goes into the `Authorization` header, so it may only hold visible ASCII
+/// (no spaces, control characters or non-ASCII). Empty means no token.
+pub(crate) fn valid_token(value: &str) -> bool {
+    value.bytes().all(|b| b.is_ascii_graphic())
 }
 
 pub(crate) fn valid_url(value: &str, schemes: &[&str]) -> bool {
@@ -180,6 +197,49 @@ mod tests {
         assert_eq!(
             normalize(with_urls("", "wss://")),
             Err(ConfigError::InvalidWsUrl)
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_tokens_that_cannot_be_sent_as_a_header() {
+        let with_tokens = |http: &str, ws: &str| IntegrationConfig {
+            http: HttpTarget {
+                token: http.into(),
+                ..Default::default()
+            },
+            ws: WsTarget {
+                token: ws.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for bad in [
+            "two words",
+            "line\nbreak",
+            "tab\there",
+            "nul\0",
+            "del\x7f",
+            "tök",
+        ] {
+            assert_eq!(
+                normalize(with_tokens(bad, "")),
+                Err(ConfigError::InvalidHttpToken),
+                "{bad:?}"
+            );
+            assert_eq!(
+                normalize(with_tokens("", bad)),
+                Err(ConfigError::InvalidWsToken),
+                "{bad:?}"
+            );
+        }
+        // Visible ASCII, including base64 and JWT characters, is fine; so is no token.
+        let ok = "eyJhbGciOi.J9-_~+/=!#$%&'*.^`|";
+        assert!(normalize(with_tokens(ok, ok)).is_ok());
+        assert!(normalize(with_tokens("", "")).is_ok());
+        // Surrounding whitespace is trimmed first.
+        assert_eq!(
+            normalize(with_tokens(" abc\n", "")).unwrap().http.token,
+            "abc"
         );
     }
 

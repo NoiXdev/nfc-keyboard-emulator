@@ -4,7 +4,7 @@ use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::config::{valid_url, IntegrationConfig};
+use super::config::{valid_token, valid_url, IntegrationConfig};
 use super::http::origin_of;
 
 pub const FORMAT_ID: &str = "nfc-keyboard-emulator/server-config";
@@ -65,6 +65,8 @@ pub enum ImportError {
     UnsupportedVersion { version: u32 },
     InvalidHttpUrl,
     InvalidWsUrl,
+    InvalidHttpToken,
+    InvalidWsToken,
     InvalidLink,
 }
 
@@ -128,6 +130,14 @@ pub fn parse_config_file(text: &str) -> Result<ServerConfigFile, ImportError> {
     let ws_url = file.ws.as_ref().and_then(|w| w.url.as_deref());
     if !valid_url(ws_url.unwrap_or(""), &["ws", "wss"]) {
         return Err(ImportError::InvalidWsUrl);
+    }
+    let http_token = file.http.as_ref().and_then(|h| h.token.as_deref());
+    if !valid_token(http_token.unwrap_or("")) {
+        return Err(ImportError::InvalidHttpToken);
+    }
+    let ws_token = file.ws.as_ref().and_then(|w| w.token.as_deref());
+    if !valid_token(ws_token.unwrap_or("")) {
+        return Err(ImportError::InvalidWsToken);
     }
     Ok(file)
 }
@@ -457,6 +467,31 @@ mod tests {
             Err(ImportError::InvalidWsUrl)
         );
         assert!(with(r#""http":{"url":""},"ws":{"url":""}"#).is_ok());
+    }
+
+    #[test]
+    fn rejects_tokens_with_invalid_characters() {
+        let with = |body: &str| {
+            parse_config_file(&format!(
+                r#"{{"format":"nfc-keyboard-emulator/server-config","version":1,{body}}}"#
+            ))
+        };
+        assert_eq!(
+            with(r#""http":{"token":"two words"}"#),
+            Err(ImportError::InvalidHttpToken)
+        );
+        assert_eq!(
+            with(r#""ws":{"token":"a\u0001b"}"#),
+            Err(ImportError::InvalidWsToken)
+        );
+        assert_eq!(
+            with(r#""ws":{"token":"tök"}"#),
+            Err(ImportError::InvalidWsToken)
+        );
+        let err = with(r#""http":{"token":"secret\nvalue"}"#).unwrap_err();
+        assert_eq!(err, ImportError::InvalidHttpToken);
+        assert!(!serde_json::to_string(&err).unwrap().contains("secret"));
+        assert!(with(r#""http":{"token":" ok-token \n"},"ws":{"token":""}"#).is_ok());
     }
 
     #[test]
@@ -885,10 +920,38 @@ mod tests {
             ),
             ("stream not bool", doc(r#","ws":{"stream":1}"#), false),
             ("token not string", doc(r#","ws":{"token":5}"#), false),
+            (
+                "visible ascii token",
+                doc(r#","http":{"token":"eyJ0.e30-_~+/=!*"},"ws":{"token":"abc"}"#),
+                true,
+            ),
+            ("token with space", doc(r#","http":{"token":"a b"}"#), false),
+            ("token with tab", doc(r#","ws":{"token":"a\tb"}"#), false),
+            (
+                "token with control char",
+                doc(r#","ws":{"token":"a\u0001b"}"#),
+                false,
+            ),
+            (
+                "token with del",
+                doc(r#","http":{"token":"a\u007fb"}"#),
+                false,
+            ),
+            ("token non-ascii", doc(r#","ws":{"token":"tök"}"#), false),
+            (
+                "token with surrounding whitespace",
+                doc(r#","http":{"token":" abc "}"#),
+                false,
+            ),
         ];
 
-        // The parser is deliberately more lenient here (it percent-encodes and lowercases).
-        const SCHEMA_STRICTER: [&str; 2] = ["http space in path", "http uppercase scheme"];
+        // The parser is deliberately more lenient here (it percent-encodes and lowercases
+        // URLs, and trims tokens).
+        const SCHEMA_STRICTER: [&str; 3] = [
+            "http space in path",
+            "http uppercase scheme",
+            "token with surrounding whitespace",
+        ];
 
         let schema: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
         let validator = jsonschema::validator_for(&schema).unwrap();

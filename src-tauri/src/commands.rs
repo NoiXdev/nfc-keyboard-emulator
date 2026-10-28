@@ -249,6 +249,8 @@ pub fn apply_import(
     save_integration(&app, &state, &hub, config_file::apply(&current, &file)).map_err(|e| match e {
         ConfigError::InvalidHttpUrl => ImportError::InvalidHttpUrl,
         ConfigError::InvalidWsUrl => ImportError::InvalidWsUrl,
+        ConfigError::InvalidHttpToken => ImportError::InvalidHttpToken,
+        ConfigError::InvalidWsToken => ImportError::InvalidWsToken,
     })
 }
 

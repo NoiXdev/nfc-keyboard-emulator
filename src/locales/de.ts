@@ -144,6 +144,8 @@ export default {
       unsupported_version: "Diese Konfiguration hat Version {version}, die diese App nicht unterstützt. Bitte die App aktualisieren.",
       invalid_http_url: "Die HTTP-URL muss mit http:// oder https:// beginnen.",
       invalid_ws_url: "Die WebSocket-URL muss mit ws:// oder wss:// beginnen.",
+      invalid_http_token: "Das HTTP-Token darf nur sichtbare ASCII-Zeichen enthalten, ohne Leerzeichen oder Zeilenumbrüche.",
+      invalid_ws_token: "Das WebSocket-Token darf nur sichtbare ASCII-Zeichen enthalten, ohne Leerzeichen oder Zeilenumbrüche.",
       invalid_link: "Dieser Link ist keine gültige Serverkonfiguration.",
     },
   },

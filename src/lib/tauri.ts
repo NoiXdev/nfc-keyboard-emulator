@@ -91,7 +91,11 @@ export type WsState =
 
 export type WsStatus = WsState & { requestPending: boolean };
 
-export type ConfigError = { kind: "invalid_http_url" } | { kind: "invalid_ws_url" };
+export type ConfigError =
+  | { kind: "invalid_http_url" }
+  | { kind: "invalid_ws_url" }
+  | { kind: "invalid_http_token" }
+  | { kind: "invalid_ws_token" };
 
 export type ImportError =
   | { kind: "invalid_json"; message: string }
@@ -99,6 +103,8 @@ export type ImportError =
   | { kind: "unsupported_version"; version: number }
   | { kind: "invalid_http_url" }
   | { kind: "invalid_ws_url" }
+  | { kind: "invalid_http_token" }
+  | { kind: "invalid_ws_token" }
   | { kind: "invalid_link" };
 
 export type ImportSource = "file" | "link";

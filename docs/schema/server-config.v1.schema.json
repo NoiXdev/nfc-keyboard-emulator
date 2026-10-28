@@ -36,7 +36,8 @@
         },
         "token": {
           "type": "string",
-          "description": "Sent as Authorization: Bearer <token>. The app trims surrounding whitespace. An absent key leaves the token unchanged; an empty string clears it."
+          "description": "Sent as Authorization: Bearer <token>. Only visible ASCII characters (no spaces, control characters or non-ASCII), since the token goes into an HTTP header. The app trims surrounding whitespace before validating. An absent key leaves the token unchanged; an empty string clears it.",
+          "pattern": "^[!-~]*$"
         }
       },
       "additionalProperties": true
@@ -52,7 +53,8 @@
         },
         "token": {
           "type": "string",
-          "description": "Sent as Authorization: Bearer <token> on the upgrade request. The app trims surrounding whitespace. An absent key leaves the token unchanged; an empty string clears it."
+          "description": "Sent as Authorization: Bearer <token> on the upgrade request. Only visible ASCII characters (no spaces, control characters or non-ASCII), since the token goes into an HTTP header. The app trims surrounding whitespace before validating. An absent key leaves the token unchanged; an empty string clears it.",
+          "pattern": "^[!-~]*$"
         },
         "stream": {
           "type": "boolean",

@@ -103,6 +103,8 @@ describe("serverErrorText", () => {
     { kind: "unsupported_version", version: 7 },
     { kind: "invalid_http_url" },
     { kind: "invalid_ws_url" },
+    { kind: "invalid_http_token" },
+    { kind: "invalid_ws_token" },
     { kind: "invalid_link" },
   ];
 
