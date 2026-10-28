@@ -66,7 +66,20 @@ export default {
     length: "Length",
     typed: "Typed",
     status: "Status",
+    server: "Server",
     empty: "No scans yet. Place a card on the reader.",
+  },
+  delivery: {
+    pending: "Sending …",
+    ok: "Delivered",
+    error: {
+      invalid_url: "Invalid server address",
+      unreachable: "Server unreachable: {message}",
+      timeout: "Server did not answer in time",
+      token_rejected: "Token rejected (HTTP {status})",
+      http_status: "Server answered with HTTP {status}",
+      not_connected: "Not connected to the server",
+    },
   },
   status: {
     ok: "OK",
@@ -84,6 +97,12 @@ export default {
     typing: "Typing",
     active: "active",
     off: "off",
+    server: "Server",
+    serverConnected: "connected",
+    serverConnecting: "connecting",
+    serverReconnecting: "reconnecting ({error})",
+    serverTokenRejected: "token rejected",
+    serverWaiting: "waiting for scan",
   },
   a11y: {
     ok: "Access granted – or not required on this platform.",

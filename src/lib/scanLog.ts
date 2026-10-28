@@ -1,10 +1,10 @@
 import type { ScanRecord } from "./tauri";
 
-export function pushScan(
-  log: ScanRecord[],
-  record: ScanRecord,
+export function pushScan<T extends ScanRecord>(
+  log: T[],
+  record: T,
   capacity: number,
-): ScanRecord[] {
+): T[] {
   const next = [record, ...log];
   return next.slice(0, Math.max(1, capacity));
 }

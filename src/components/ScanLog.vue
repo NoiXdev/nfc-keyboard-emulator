@@ -1,9 +1,23 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import type { ScanRecord } from "../lib/tauri";
-defineProps<{ scans: ScanRecord[] }>();
+import type { DeliveryTarget } from "../lib/tauri";
+import { deliveryErrorText, type DeliveryState, type LoggedScan } from "../lib/delivery";
+defineProps<{ scans: LoggedScan[] }>();
 defineEmits<{ export: [] }>();
 const { t } = useI18n();
+
+const TARGET_LABEL: Record<DeliveryTarget, string> = { http: "HTTP", ws: "WS" };
+const MARK: Record<DeliveryState["state"], string> = { pending: "…", ok: "✓", failed: "✗" };
+
+function deliveries(s: LoggedScan) {
+  return s.deliveryTargets.flatMap((target) => {
+    const d = s.delivery[target];
+    return d ? [{ target, d }] : [];
+  });
+}
+function deliveryTitle(d: DeliveryState): string {
+  return d.state === "failed" ? deliveryErrorText(t, d.error) : t(`delivery.${d.state}`);
+}
 </script>
 
 <template>
@@ -23,6 +37,7 @@ const { t } = useI18n();
             <th>{{ t("log.length") }}</th>
             <th>{{ t("log.typed") }}</th>
             <th>{{ t("log.status") }}</th>
+            <th>{{ t("log.server") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -33,6 +48,18 @@ const { t } = useI18n();
             <td>{{ s.uidLength }}</td>
             <td>{{ s.typed ? "✓" : "—" }}</td>
             <td><span class="status" :class="s.status">{{ t(`status.${s.status}`) }}</span></td>
+            <td data-test="server">
+              <template v-if="deliveries(s).length">
+                <span
+                  v-for="{ target, d } in deliveries(s)"
+                  :key="target"
+                  class="badge"
+                  :class="d.state"
+                  :title="deliveryTitle(d)"
+                >{{ TARGET_LABEL[target] }} {{ MARK[d.state] }}</span>
+              </template>
+              <template v-else>—</template>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -116,6 +143,23 @@ tbody tr:last-child td {
 .status.read_error,
 .status.type_error,
 .status.no_accessibility {
+  background: #fdeceb;
+  color: #a23b32;
+}
+.badge {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef0f6;
+  color: #5b6478;
+}
+.badge.ok {
+  background: #e7f8f4;
+  color: #0f5f53;
+}
+.badge.failed {
   background: #fdeceb;
   color: #a23b32;
 }

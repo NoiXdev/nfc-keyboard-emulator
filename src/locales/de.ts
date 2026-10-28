@@ -66,7 +66,20 @@ export default {
     length: "Länge",
     typed: "Getippt",
     status: "Status",
+    server: "Server",
     empty: "Noch keine Scans. Karte auf den Leser legen.",
+  },
+  delivery: {
+    pending: "Wird gesendet …",
+    ok: "Zugestellt",
+    error: {
+      invalid_url: "Ungültige Serveradresse",
+      unreachable: "Server nicht erreichbar: {message}",
+      timeout: "Server hat nicht rechtzeitig geantwortet",
+      token_rejected: "Token abgelehnt (HTTP {status})",
+      http_status: "Server antwortete mit HTTP {status}",
+      not_connected: "Nicht mit dem Server verbunden",
+    },
   },
   status: {
     ok: "OK",
@@ -84,6 +97,12 @@ export default {
     typing: "Tippen",
     active: "aktiv",
     off: "aus",
+    server: "Server",
+    serverConnected: "verbunden",
+    serverConnecting: "verbindet",
+    serverReconnecting: "verbindet neu ({error})",
+    serverTokenRejected: "Token abgelehnt",
+    serverWaiting: "wartet auf Scan",
   },
   a11y: {
     ok: "Zugriff erteilt – oder auf dieser Plattform nicht erforderlich.",

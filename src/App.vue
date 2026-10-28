@@ -6,12 +6,16 @@ import {
   onScan,
   onReadersChanged,
   onReaderStatus,
+  onDelivery,
+  onWsStatus,
   type Config,
   type FormatConfig,
   type ReaderStatus,
   type ScanRecord,
+  type WsStatus,
 } from "./lib/tauri";
 import { pushScan } from "./lib/scanLog";
+import { applyDelivery, withPendingDelivery, type LoggedScan } from "./lib/delivery";
 import { type NavView } from "./lib/nav";
 import { setLocale, type Locale } from "./i18n";
 import { checkForUpdate, type UpdateInfo } from "./lib/update";
@@ -40,8 +44,9 @@ const { t, locale } = useI18n();
 
 const config = ref<Config | null>(null);
 const readers = ref<string[]>([]);
-const scans = ref<ScanRecord[]>([]);
+const scans = ref<LoggedScan[]>([]);
 const status = ref<ReaderStatus | null>(null);
+const ws = ref<WsStatus | null>(null);
 const typing = ref(false);
 const accessibilityOk = ref(true);
 const activeView = ref<NavView>("scanner");
@@ -128,12 +133,17 @@ onMounted(async () => {
   accessibilityOk.value = await api.checkAccessibility();
   unlisten.push(
     await onScan((r) => {
-      scans.value = pushScan(scans.value, r, config.value!.logRetention);
+      scans.value = pushScan(scans.value, withPendingDelivery(r), config.value!.logRetention);
       notifyForScan(r);
     }),
   );
   unlisten.push(await onReadersChanged((r) => (readers.value = r)));
   unlisten.push(await onReaderStatus((s) => (status.value = s)));
+  unlisten.push(await onDelivery((r) => (scans.value = applyDelivery(scans.value, r))));
+  unlisten.push(await onWsStatus((s) => (ws.value = s)));
+  // An event that arrived while the snapshot was in flight is newer than the snapshot.
+  const snapshot = await api.getWsStatus();
+  ws.value ??= snapshot;
   autostart.value = await isAutostartEnabled();
   startMinimized.value = config.value!.startMinimized;
   if (notifyMode.value !== "off") await ensureNotifyPermission();
@@ -254,7 +264,7 @@ function changeLanguage(v: string) {
         />
       </div>
 
-      <StatusBar :status="status" :typing="typing" />
+      <StatusBar :status="status" :typing="typing" :ws="ws" />
     </div>
   </div>
 </template>
