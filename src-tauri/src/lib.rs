@@ -13,6 +13,7 @@ mod typer;
 mod worker;
 
 use crate::config::Config;
+use crate::integration::config_file::{decode_link, ImportSource};
 use crate::integration::protocol::DeliveryResult;
 use crate::integration::route;
 use crate::integration::ws::{WsEvents, WsStatus};
@@ -29,6 +30,7 @@ use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Forwards integration events to the frontend. Payloads never contain tokens.
 struct TauriEvents {
@@ -92,14 +94,33 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
+/// Stages a config link for confirmation and brings the window up to show it. Nothing is
+/// applied here; the frontend gets the preview (or the error) and the user decides.
+fn handle_config_link(app: &AppHandle, url: &str) {
+    focus_main_window(app);
+    match decode_link(url) {
+        Ok(file) => {
+            let preview =
+                commands::stage_import(&app.state::<AppState>(), file, ImportSource::Link);
+            let _ = app.emit("import-preview", preview);
+        }
+        Err(e) => {
+            let _ = app.emit("import-error", e);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // Must stay first: the plugin exits a second instance from its own setup
         // hook, which has to happen before ours claims the PC/SC reader.
+        // With its `deep-link` feature it hands a second instance's argv (how Windows
+        // delivers a link) to the deep-link plugin, which reports it via `on_open_url`.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_main_window(app);
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -135,6 +156,18 @@ pub fn run() {
                 app.package_info().version.to_string(),
             ));
             app.manage(hub.clone());
+
+            // Config links: one that started the app, and those opened while it runs.
+            let link_handle = handle.clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    handle_config_link(&link_handle, url.as_str());
+                }
+            });
+            let startup_links = app.deep_link().get_current().ok().flatten();
+            for url in startup_links.iter().flatten() {
+                handle_config_link(&handle, url.as_str());
+            }
 
             // Tray
             let show = MenuItem::with_id(app, "show", "Anzeigen", true, None::<&str>)?;
@@ -194,8 +227,8 @@ pub fn run() {
                 });
             });
 
-            // Start-minimized
-            if config.start_minimized {
+            // Start-minimized, unless a link started the app and waits for confirmation.
+            if config.start_minimized && startup_links.is_none() {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
@@ -225,6 +258,11 @@ pub fn run() {
             commands::test_ws,
             commands::ws_reconnect,
             commands::get_ws_status,
+            commands::export_server_config,
+            commands::import_server_config,
+            commands::get_pending_import,
+            commands::apply_import,
+            commands::discard_import,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

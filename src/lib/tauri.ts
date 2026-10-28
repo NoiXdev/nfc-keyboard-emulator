@@ -92,6 +92,32 @@ export type WsStatus = WsState & { requestPending: boolean };
 
 export type ConfigError = { kind: "invalid_http_url" } | { kind: "invalid_ws_url" };
 
+export type ImportError =
+  | { kind: "invalid_json"; message: string }
+  | { kind: "wrong_format" }
+  | { kind: "unsupported_version"; version: number }
+  | { kind: "invalid_http_url" }
+  | { kind: "invalid_ws_url" }
+  | { kind: "invalid_link" };
+
+export type ImportSource = "file" | "link";
+
+export type TokenChange = "unchanged" | "set" | "cleared";
+
+/** What applying an import changes; tokens appear only as a TokenChange. */
+export interface ImportPreview {
+  id: string;
+  source: ImportSource;
+  deviceName: string;
+  httpEnabled: boolean;
+  httpHost: string | null;
+  httpToken: TokenChange;
+  wsHost: string | null;
+  wsStream: boolean;
+  wsRequest: boolean;
+  wsToken: TokenChange;
+}
+
 export type ReaderStatus =
   | { kind: "connected" }
   | { kind: "disconnected" }
@@ -116,6 +142,11 @@ export const api = {
   testWs: (ws: WsTarget, deviceName: string) => invoke<void>("test_ws", { ws, deviceName }),
   wsReconnect: () => invoke<void>("ws_reconnect"),
   getWsStatus: () => invoke<WsStatus>("get_ws_status"),
+  exportServerConfig: () => invoke<boolean>("export_server_config"),
+  importServerConfig: () => invoke<ImportPreview | null>("import_server_config"),
+  getPendingImport: () => invoke<ImportPreview | null>("get_pending_import"),
+  applyImport: (id: string) => invoke<Config>("apply_import", { id }),
+  discardImport: (id: string) => invoke<void>("discard_import", { id }),
 };
 
 export const onScan = (cb: (r: ScanRecord) => void): Promise<UnlistenFn> =>
@@ -130,3 +161,13 @@ export const onWsStatus = (cb: (s: WsStatus) => void): Promise<UnlistenFn> =>
   listen<WsStatus>("ws-status", (e) => cb(e.payload));
 export const onWsRequest = (cb: (requestId: string) => void): Promise<UnlistenFn> =>
   listen<{ requestId: string }>("ws-request", (e) => cb(e.payload.requestId));
+// A link that started the app arrives before anyone listens, so the pending import is
+// fetched once after subscribing as well.
+export const onImportPreview = async (cb: (p: ImportPreview) => void): Promise<UnlistenFn> => {
+  const unlisten = await listen<ImportPreview>("import-preview", (e) => cb(e.payload));
+  const pending = await api.getPendingImport();
+  if (pending) cb(pending);
+  return unlisten;
+};
+export const onImportError = (cb: (e: ImportError) => void): Promise<UnlistenFn> =>
+  listen<ImportError>("import-error", (e) => cb(e.payload));

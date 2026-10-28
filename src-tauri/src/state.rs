@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::integration::config_file::{ImportSource, ServerConfigFile};
 use crate::integration::requests::RequestSlot;
 use crate::reader::WorkerCommand;
 use crate::scan::ScanRecord;
@@ -19,6 +20,9 @@ pub struct AppState {
     pub worker_tx: Mutex<Option<Sender<WorkerCommand>>>,
     pub history: Arc<Mutex<VecDeque<ScanRecord>>>,
     pub readers: Arc<Mutex<Vec<String>>>,
+    /// The import waiting for the user's confirmation, keyed by its preview id. A new
+    /// import replaces it.
+    pub pending_import: Mutex<Option<(String, ServerConfigFile, ImportSource)>>,
 }
 
 impl AppState {
@@ -31,6 +35,7 @@ impl AppState {
             worker_tx: Mutex::new(None),
             history: Arc::new(Mutex::new(VecDeque::new())),
             readers: Arc::new(Mutex::new(Vec::new())),
+            pending_import: Mutex::new(None),
         }
     }
 }
