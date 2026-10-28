@@ -1,3 +1,4 @@
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::scan::{DeliveryTarget, ScanRecord};
@@ -24,8 +25,19 @@ pub fn scan_payload(rec: &ScanRecord, device: &str) -> ScanPayload {
         uid: rec.uid_hex.clone(),
         uid_formatted: rec.uid_formatted.clone(),
         uid_length: rec.uid_length,
-        timestamp: rec.timestamp.clone(),
+        timestamp: wire_timestamp(&rec.timestamp),
     }
+}
+
+/// The protocol promises RFC 3339 in UTC with millisecond precision and a `Z` suffix; the
+/// record's own timestamp keeps its finer local format. An unparsable value is passed through.
+fn wire_timestamp(timestamp: &str) -> String {
+    DateTime::parse_from_rfc3339(timestamp)
+        .map(|t| {
+            t.with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Millis, true)
+        })
+        .unwrap_or_else(|_| timestamp.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -167,6 +179,25 @@ mod tests {
                 "timestamp": "2026-10-28T13:45:21.123Z"
             })
         );
+    }
+
+    #[test]
+    fn payload_timestamp_is_utc_with_milliseconds() {
+        let mut rec = record();
+        rec.timestamp = "2026-10-28T13:45:21.123456789+00:00".into();
+        assert_eq!(
+            scan_payload(&rec, "Reception").timestamp,
+            "2026-10-28T13:45:21.123Z"
+        );
+        // A non-UTC offset is converted, not just relabelled.
+        rec.timestamp = "2026-10-28T15:45:21.5+02:00".into();
+        assert_eq!(
+            scan_payload(&rec, "Reception").timestamp,
+            "2026-10-28T13:45:21.500Z"
+        );
+        // Unparsable values pass through unchanged.
+        rec.timestamp = "yesterday".into();
+        assert_eq!(scan_payload(&rec, "Reception").timestamp, "yesterday");
     }
 
     #[test]
