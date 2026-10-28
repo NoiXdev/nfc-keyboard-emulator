@@ -9,9 +9,20 @@ use super::protocol::{ClientMessage, DeliveryError, PROTOCOL_VERSION};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Installs ring as the process-wide rustls crypto provider (reqwest is built with
+/// `rustls-no-provider` so that aws-lc is not pulled in). Safe to call repeatedly: an
+/// already installed provider is kept.
+pub fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 pub fn http_client(app_version: &str) -> reqwest::Client {
+    install_crypto_provider();
     reqwest::Client::builder()
         .timeout(HTTP_TIMEOUT)
+        // A redirect would turn the POST into a GET or re-send scan data to a host the user
+        // never configured; a 3xx is reported as an HTTP status error instead.
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("nfc-keyboard-emulator/{app_version}"))
         .build()
         .expect("static HTTP client configuration is valid")
@@ -125,8 +136,14 @@ mod tests {
                     break;
                 }
             }
-            let reply =
-                format!("HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            let location = if (300..400).contains(&status) {
+                "Location: /elsewhere\r\n"
+            } else {
+                ""
+            };
+            let reply = format!(
+                "HTTP/1.1 {status} X\r\n{location}Content-Length: 0\r\nConnection: close\r\n\r\n"
+            );
             sock.write_all(reply.as_bytes()).await.unwrap();
             sock.shutdown().await.ok();
             String::from_utf8_lossy(&raw).into_owned()
@@ -229,6 +246,7 @@ mod tests {
             (401, Err(DeliveryError::TokenRejected { status: 401 })),
             (403, Err(DeliveryError::TokenRejected { status: 403 })),
             (500, Err(DeliveryError::HttpStatus { status: 500 })),
+            (302, Err(DeliveryError::HttpStatus { status: 302 })),
         ] {
             let (base, server) = serve_once(status).await;
             let got = post_message(&client, &target(base, "t"), &scan_message()).await;
@@ -279,6 +297,25 @@ mod tests {
         );
         assert!(!message.contains("urlsecret"), "{message}");
         assert!(!message.contains("/hook"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn https_to_closed_port_is_unreachable() {
+        // Exercises the TLS stack setup: a missing rustls crypto provider would panic here.
+        let port = {
+            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let client = http_client("1.2.3");
+        let t = target(format!("https://127.0.0.1:{port}/hook"), "tok-123");
+        let got = post_message(&client, &t, &scan_message()).await;
+        let Err(DeliveryError::Unreachable { message }) = got else {
+            panic!("expected Unreachable, got {got:?}");
+        };
+        assert!(
+            message.starts_with("connection refused (https://127.0.0.1:"),
+            "{message}"
+        );
     }
 
     #[tokio::test]
