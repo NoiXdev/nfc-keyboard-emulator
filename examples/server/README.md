@@ -36,4 +36,4 @@ Do not copy it as it is.
 `server.mjs` has comments on each protocol rule (token check on the upgrade, the
 `hello` message, `scan`, `scan_request`, `scan_response` and `scan_request_ended`).
 The full protocol is described in the
-[server integration guide](https://docs.noix.dev/nfc-keyboard-emulator/guide/server-integration/).
+[server protocol reference](https://docs.noix.dev/nfc-keyboard-emulator/reference/server-protocol/).
