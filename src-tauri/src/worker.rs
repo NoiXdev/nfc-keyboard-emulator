@@ -54,8 +54,15 @@ pub fn run_worker(mut deps: WorkerDeps) {
                 ReaderEvent::Scan { reader, uid } => {
                     let cfg = deps.config.lock().unwrap().clone();
                     let enabled = deps.typing_enabled.load(Ordering::Relaxed);
-                    let rec =
-                        handle_scan(&uid, &reader, now_iso(), &cfg, enabled, deps.typer.as_mut());
+                    let rec = handle_scan(
+                        &uid,
+                        &reader,
+                        now_iso(),
+                        &cfg,
+                        enabled,
+                        None,
+                        deps.typer.as_mut(),
+                    );
                     deps.sink.scan(&rec);
                 }
                 ReaderEvent::ReadError { reader } => {

@@ -12,6 +12,10 @@ const rec: ScanRecord = {
   typed: true,
   typedString: "04A1B2C3\n",
   status: "ok",
+  scanId: "id-1",
+  uidFormatted: "04A1B2C3",
+  requestId: null,
+  deliveryTargets: [],
 };
 
 describe("ScanLog", () => {

@@ -10,6 +10,10 @@ const rec = (uid: string): ScanRecord => ({
   typed: true,
   typedString: `${uid}\n`,
   status: "ok",
+  scanId: `id-${uid}`,
+  uidFormatted: uid,
+  requestId: null,
+  deliveryTargets: [],
 });
 
 describe("pushScan", () => {

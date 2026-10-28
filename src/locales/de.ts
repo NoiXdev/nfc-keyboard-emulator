@@ -74,6 +74,7 @@ export default {
     typing_disabled: "Tippen aus",
     no_accessibility: "Keine Bedienungshilfen",
     type_error: "Tippfehler",
+    server_request: "Server-Anfrage beantwortet",
   },
   footer: {
     reader: "Leser",

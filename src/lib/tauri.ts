@@ -47,7 +47,8 @@ export type ScanStatus =
   | "read_error"
   | "typing_disabled"
   | "no_accessibility"
-  | "type_error";
+  | "type_error"
+  | "server_request";
 
 export interface ScanRecord {
   timestamp: string;
@@ -57,6 +58,10 @@ export interface ScanRecord {
   typed: boolean;
   typedString: string;
   status: ScanStatus;
+  scanId: string;
+  uidFormatted: string;
+  requestId: string | null;
+  deliveryTargets: ("http" | "ws")[];
 }
 
 export type ReaderStatus =

@@ -74,6 +74,7 @@ export default {
     typing_disabled: "Typing off",
     no_accessibility: "No accessibility",
     type_error: "Type error",
+    server_request: "Answered server request",
   },
   footer: {
     reader: "Reader",

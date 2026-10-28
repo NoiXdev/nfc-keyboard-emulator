@@ -46,6 +46,10 @@ mod tests {
             typed: true,
             typed_string: "04A1B2C3\n".into(),
             status: ScanStatus::Ok,
+            scan_id: "id".into(),
+            uid_formatted: "04A1B2C3".into(),
+            request_id: None,
+            delivery_targets: vec![],
         }
     }
 
