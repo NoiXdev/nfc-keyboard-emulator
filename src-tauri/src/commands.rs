@@ -1,10 +1,15 @@
 use crate::config::{Config, FormatConfig};
 use crate::csv_export::scans_to_csv;
 use crate::formatter::format_uid;
+use crate::integration::config::{normalize, ConfigError, HttpTarget, IntegrationConfig, WsTarget};
+use crate::integration::protocol::DeliveryError;
+use crate::integration::ws::WsStatus;
+use crate::integration::{http, ws, IntegrationHub};
 use crate::reader::WorkerCommand;
 use crate::scan::ScanRecord;
 use crate::state::{save_config, AppState};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::State;
 
 fn send_worker(state: &AppState, cmd: WorkerCommand) {
@@ -100,4 +105,76 @@ pub fn check_accessibility() -> bool {
 #[tauri::command]
 pub fn open_accessibility_settings() {
     crate::accessibility::prompt_or_open();
+}
+
+#[tauri::command]
+pub fn update_integration(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    hub: State<Arc<IntegrationHub>>,
+    integration: IntegrationConfig,
+) -> Result<Config, ConfigError> {
+    let integration = normalize(integration)?;
+    let saved = {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.integration = integration;
+        save_config(&app, &cfg);
+        cfg.clone()
+    };
+    hub.settings_changed();
+    Ok(saved)
+}
+
+/// The device name a test announces: the form value, or the host name when it is empty.
+fn test_device(device_name: String) -> String {
+    IntegrationConfig {
+        device_name: device_name.trim().to_string(),
+        ..Default::default()
+    }
+    .effective_device_name()
+}
+
+/// Tests the values currently in the form, not the saved settings, and works while the
+/// mode is off.
+#[tauri::command]
+pub async fn test_http(
+    hub: State<'_, Arc<IntegrationHub>>,
+    http: HttpTarget,
+    device_name: String,
+) -> Result<(), DeliveryError> {
+    let target = HttpTarget {
+        url: http.url.trim().to_string(),
+        token: http.token.trim().to_string(),
+        ..http
+    };
+    http::test_http(hub.http(), &target, &test_device(device_name)).await
+}
+
+#[tauri::command]
+pub async fn test_ws(
+    app: tauri::AppHandle,
+    ws: WsTarget,
+    device_name: String,
+) -> Result<(), DeliveryError> {
+    let target = WsTarget {
+        url: ws.url.trim().to_string(),
+        token: ws.token.trim().to_string(),
+        ..ws
+    };
+    ws::test_ws(
+        &target,
+        &test_device(device_name),
+        &app.package_info().version.to_string(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn ws_reconnect(hub: State<Arc<IntegrationHub>>) {
+    hub.ws().reconnect();
+}
+
+#[tauri::command]
+pub fn get_ws_status(hub: State<Arc<IntegrationHub>>) -> WsStatus {
+    hub.ws().status()
 }

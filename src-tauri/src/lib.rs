@@ -3,8 +3,6 @@ mod commands;
 mod config;
 mod csv_export;
 mod formatter;
-// Consumed by later server-integration tasks; drop the allow once wired up.
-#[allow(dead_code)]
 mod integration;
 mod pipeline;
 mod reader;
@@ -14,6 +12,11 @@ mod state;
 mod typer;
 mod worker;
 
+use crate::config::Config;
+use crate::integration::protocol::DeliveryResult;
+use crate::integration::route;
+use crate::integration::ws::{WsEvents, WsStatus};
+use crate::integration::{HubEvents, IntegrationHub};
 use crate::reader::{ReaderBackend, ReaderStatus, WorkerCommand};
 use crate::reader_pcsc::PcscReader;
 use crate::scan::ScanRecord;
@@ -27,8 +30,31 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 
+/// Forwards integration events to the frontend. Payloads never contain tokens.
+struct TauriEvents {
+    app: AppHandle,
+}
+
+impl WsEvents for TauriEvents {
+    fn status(&self, s: &WsStatus) {
+        let _ = self.app.emit("ws-status", s);
+    }
+    fn delivery(&self, r: &DeliveryResult) {
+        let _ = self.app.emit("scan-delivery", r);
+    }
+    fn request_armed(&self, request_id: &str) {
+        let _ = self
+            .app
+            .emit("ws-request", serde_json::json!({ "requestId": request_id }));
+    }
+}
+
+impl HubEvents for TauriEvents {}
+
 struct TauriSink {
     app: AppHandle,
+    config: Arc<Mutex<Config>>,
+    hub: Arc<IntegrationHub>,
     history: Arc<Mutex<VecDeque<ScanRecord>>>,
     readers: Arc<Mutex<Vec<String>>>,
     retention: usize,
@@ -36,6 +62,8 @@ struct TauriSink {
 
 impl WorkerSink for TauriSink {
     fn scan(&self, record: &ScanRecord) {
+        let mut record = record.clone();
+        record.delivery_targets = route(&self.config.lock().unwrap().integration, &record);
         {
             let mut hist = self.history.lock().unwrap();
             hist.push_front(record.clone());
@@ -43,7 +71,9 @@ impl WorkerSink for TauriSink {
                 hist.pop_back();
             }
         }
-        let _ = self.app.emit("scan", record);
+        let _ = self.app.emit("scan", &record);
+        // Only enqueues work: HTTP runs on the async runtime, the WebSocket task owns its socket.
+        self.hub.dispatch(&record);
     }
     fn readers_changed(&self, readers: &[String]) {
         *self.readers.lock().unwrap() = readers.to_vec();
@@ -96,6 +126,16 @@ pub fn run() {
 
             app.manage(app_state);
 
+            let hub = Arc::new(IntegrationHub::new(
+                shared_config.clone(),
+                requests.clone(),
+                Arc::new(TauriEvents {
+                    app: handle.clone(),
+                }),
+                app.package_info().version.to_string(),
+            ));
+            app.manage(hub.clone());
+
             // Tray
             let show = MenuItem::with_id(app, "show", "Anzeigen", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
@@ -124,6 +164,8 @@ pub fn run() {
             // Worker-Thread
             let sink = TauriSink {
                 app: handle.clone(),
+                config: shared_config.clone(),
+                hub,
                 history,
                 readers,
                 retention,
@@ -178,6 +220,11 @@ pub fn run() {
             commands::export_log_csv,
             commands::check_accessibility,
             commands::open_accessibility_settings,
+            commands::update_integration,
+            commands::test_http,
+            commands::test_ws,
+            commands::ws_reconnect,
+            commands::get_ws_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

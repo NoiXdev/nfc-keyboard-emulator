@@ -12,8 +12,6 @@ pub enum ScanStatus {
     ServerRequest,
 }
 
-// Variants are constructed by the delivery pipeline added in a later task.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryTarget {
