@@ -70,7 +70,7 @@ pub enum ImportError {
 /// Parses and validates a config file. Strings are trimmed like `normalize` does; unknown
 /// keys are ignored. Error messages never echo file content, since it may hold tokens.
 pub fn parse_config_file(text: &str) -> Result<ServerConfigFile, ImportError> {
-    let value: serde_json::Value =
+    let mut value: serde_json::Value =
         serde_json::from_str(text).map_err(|e| ImportError::InvalidJson {
             message: match e.classify() {
                 serde_json::error::Category::Data => "unexpected value".to_string(),
@@ -80,6 +80,12 @@ pub fn parse_config_file(text: &str) -> Result<ServerConfigFile, ImportError> {
 
     if value.get("format").and_then(|f| f.as_str()) != Some(FORMAT_ID) {
         return Err(ImportError::WrongFormat);
+    }
+    // JSON Schema treats `1.0` as the integer 1, so the parser accepts it too.
+    if let Some(f) = value.get("version").and_then(|v| v.as_f64()) {
+        if f.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&f) {
+            value["version"] = serde_json::Value::from(f as u64);
+        }
     }
     match value.get("version").and_then(|v| v.as_u64()) {
         Some(v) if v > u64::from(FORMAT_VERSION) => {
@@ -631,16 +637,141 @@ mod tests {
         assert_eq!(f.ws.unwrap().request, Some(true));
     }
 
+    /// Documents with the schema's verdict and the parser's. A document the schema accepts
+    /// must never be rejected by the parser; the schema may be stricter, never looser.
     #[test]
-    fn schema_url_patterns_match_scheme_rules() {
+    fn schema_and_parser_agree() {
+        fn doc(body: &str) -> String {
+            format!(r#"{{"format":"nfc-keyboard-emulator/server-config","version":1{body}}}"#)
+        }
+        let url = |section: &str, u: &str| doc(&format!(r#","{section}":{{"url":"{u}"}}"#));
+
+        let corpus: Vec<(&str, String, bool)> = vec![
+            ("spec example", DOC_EXAMPLE.to_string(), true),
+            ("minimal", doc(""), true),
+            ("absent sections", doc(r#","deviceName":"A""#), true),
+            ("empty http section", doc(r#","http":{}"#), true),
+            (
+                "cleared token",
+                doc(r#","http":{"token":""},"ws":{"token":""}"#),
+                true,
+            ),
+            (
+                "cleared urls",
+                doc(r#","http":{"url":""},"ws":{"url":""}"#),
+                true,
+            ),
+            (
+                "unknown keys",
+                doc(r#","extra":1,"http":{"retries":3},"ws":{"compression":"x"}"#),
+                true,
+            ),
+            ("http url", url("http", "http://example.com/a?b=c#d"), true),
+            ("https port", url("http", "https://example.com:8443"), true),
+            (
+                "http userinfo",
+                url("http", "https://u:p@example.com/x"),
+                true,
+            ),
+            ("http ipv6", url("http", "http://[::1]:8080/x"), true),
+            ("http max port", url("http", "http://h:65535"), true),
+            ("ws url", url("ws", "ws://localhost:9000"), true),
+            ("wss url", url("ws", "wss://example.com/scanner"), true),
+            ("http empty host", url("http", "http://:80"), false),
+            ("http space in host", url("http", "http://a b"), false),
+            (
+                "http port too large",
+                url("http", "http://host:99999"),
+                false,
+            ),
+            ("http unclosed bracket", url("http", "http://[::1"), false),
+            ("http no host", url("http", "http://"), false),
+            ("http no scheme", url("http", "example.com/api"), false),
+            ("http ftp", url("http", "ftp://x"), false),
+            ("http ws scheme", url("http", "ws://x.test"), false),
+            (
+                "http space in path",
+                url("http", "http://x.test/a b"),
+                false,
+            ),
+            ("http uppercase scheme", url("http", "HTTP://x.test"), false),
+            ("ws no host", url("ws", "ws://"), false),
+            ("ws ftp", url("ws", "ftp://x"), false),
+            ("ws https scheme", url("ws", "https://x.test"), false),
+            ("ws empty host", url("ws", "wss://:80"), false),
+            (
+                "version 1.0",
+                r#"{"format":"nfc-keyboard-emulator/server-config","version":1.0}"#.to_string(),
+                true,
+            ),
+            (
+                "version 2",
+                r#"{"format":"nfc-keyboard-emulator/server-config","version":2}"#.to_string(),
+                false,
+            ),
+            (
+                "version 1.5",
+                r#"{"format":"nfc-keyboard-emulator/server-config","version":1.5}"#.to_string(),
+                false,
+            ),
+            (
+                "version string",
+                r#"{"format":"nfc-keyboard-emulator/server-config","version":"1"}"#.to_string(),
+                false,
+            ),
+            (
+                "version missing",
+                r#"{"format":"nfc-keyboard-emulator/server-config"}"#.to_string(),
+                false,
+            ),
+            (
+                "wrong format",
+                r#"{"format":"x","version":1}"#.to_string(),
+                false,
+            ),
+            ("format missing", r#"{"version":1}"#.to_string(), false),
+            (
+                "enabled not bool",
+                doc(r#","http":{"enabled":"yes"}"#),
+                false,
+            ),
+            ("stream not bool", doc(r#","ws":{"stream":1}"#), false),
+            ("token not string", doc(r#","ws":{"token":5}"#), false),
+        ];
+
+        // The parser is deliberately more lenient here (it percent-encodes and lowercases).
+        const SCHEMA_STRICTER: [&str; 2] = ["http space in path", "http uppercase scheme"];
+
         let schema: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        for (name, text, expect_valid) in corpus {
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let schema_valid = validator.is_valid(&value);
+            let parsed = parse_config_file(&text);
+            assert_eq!(
+                schema_valid, expect_valid,
+                "schema verdict for {name}: {text}"
+            );
+            if schema_valid {
+                assert!(
+                    parsed.is_ok(),
+                    "schema accepts but parser rejects {name}: {parsed:?}"
+                );
+            } else if !SCHEMA_STRICTER.contains(&name) {
+                assert!(parsed.is_err(), "schema rejects but parser accepts {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn version_accepts_integral_float() {
+        let f =
+            parse_config_file(r#"{"format":"nfc-keyboard-emulator/server-config","version":1.0}"#)
+                .unwrap();
+        assert_eq!(f.version, 1);
         assert_eq!(
-            schema["properties"]["http"]["properties"]["url"]["pattern"],
-            "^(https?://[^/?#\\s]+.*)?$"
-        );
-        assert_eq!(
-            schema["properties"]["ws"]["properties"]["url"]["pattern"],
-            "^(wss?://[^/?#\\s]+.*)?$"
+            parse_config_file(r#"{"format":"nfc-keyboard-emulator/server-config","version":2.0}"#),
+            Err(ImportError::UnsupportedVersion { version: 2 })
         );
     }
 }

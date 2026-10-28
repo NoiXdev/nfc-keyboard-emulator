@@ -48,3 +48,4 @@ macos-accessibility-client = "0.0.2"
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["io-util"] }
+jsonschema = { version = "0.60", default-features = false }
