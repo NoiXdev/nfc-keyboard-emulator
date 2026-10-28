@@ -39,9 +39,9 @@ jobs:
       # is public so org secrets resolve). Otherwise build unsigned.
       HAS_MACOS_SIGNING: ${{ secrets.MACOS_CERTIFICATE != '' }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with: { node-version: "22", cache: npm }
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: "24", cache: npm }
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -51,7 +51,7 @@ jobs:
 
       - name: Import signing certificate (macOS)
         if: matrix.os == 'macos-latest' && env.HAS_MACOS_SIGNING == 'true'
-        uses: apple-actions/import-codesign-certs@v3
+        uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -72,13 +72,22 @@ jobs:
           IDENTITY=$(security find-identity -v -p codesigning | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')
           echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
+      # Pass the release id instead of tagName/releaseName: given a tag,
+      # tauri-action v1 rewrites the name and body of an existing release, which
+      # would wipe the notes the Changelog workflow wrote.
+      - name: Look up release id
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "id=$(gh release view '${{ github.ref_name }}' --repo '${{ github.repository }}' --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
+
       - name: Build & attach to release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          releaseId: ${{ steps.release.outputs.id }}
           args: ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}
 
       - name: Clean up notarization key (macOS)
