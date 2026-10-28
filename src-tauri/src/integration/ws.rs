@@ -29,7 +29,8 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// No `Debug`: the target carries the token.
+/// Deliberately not `Debug` (although `WsTarget` derives it), so these settings never
+/// print the token.
 #[derive(Clone, PartialEq, Eq)]
 pub struct WsSettings {
     pub target: WsTarget,
@@ -464,10 +465,18 @@ impl Connection {
     ) -> Result<(), DeliveryError> {
         let answers_request = scan.request_id.is_some();
         let scan_id = scan.payload.scan_id.clone();
-        let Some(msg) = self.scan_message(scan) else {
+        let messages = self.scan_messages(scan);
+        if messages.is_empty() {
             return Ok(());
-        };
-        let result = send(ws, &msg, origin).await;
+        }
+        // One delivery result per scan; a failed write ends the session, so stop there.
+        let mut result = Ok(());
+        for msg in &messages {
+            result = send(ws, msg, origin).await;
+            if result.is_err() {
+                break;
+            }
+        }
         self.events.delivery(&DeliveryResult {
             scan_id,
             target: DeliveryTarget::Ws,
@@ -481,25 +490,28 @@ impl Connection {
         result
     }
 
-    /// `scan_response` for an answered request, otherwise `scan` if streaming is on.
-    fn scan_message(&self, scan: OutgoingScan) -> Option<ClientMessage> {
-        match scan.request_id {
-            Some(request_id) => Some(ClientMessage::ScanResponse {
+    /// `scan_response` for an answered request, plus `scan` whenever streaming is on.
+    fn scan_messages(&self, scan: OutgoingScan) -> Vec<ClientMessage> {
+        let mut messages = Vec::new();
+        if let Some(request_id) = scan.request_id {
+            messages.push(ClientMessage::ScanResponse {
                 protocol_version: PROTOCOL_VERSION,
                 request_id,
-                payload: scan.payload,
-            }),
-            None if self.settings.target.stream => Some(ClientMessage::Scan {
+                payload: scan.payload.clone(),
+            });
+        }
+        if self.settings.target.stream {
+            messages.push(ClientMessage::Scan {
                 protocol_version: PROTOCOL_VERSION,
                 payload: scan.payload,
-            }),
-            None => None,
+            });
         }
+        messages
     }
 
     fn report_not_connected(&self, scan: OutgoingScan) {
         let scan_id = scan.payload.scan_id.clone();
-        if self.scan_message(scan).is_some() {
+        if !self.scan_messages(scan).is_empty() {
             self.events.delivery(&DeliveryResult {
                 scan_id,
                 target: DeliveryTarget::Ws,
@@ -847,6 +859,48 @@ mod tests {
         c.handle.send_scan(&record(None), "Reception");
         conn.expect_silence(Duration::from_millis(500)).await;
         assert!(c.events.deliveries.lock().unwrap().is_empty());
+
+        // An answering scan goes out as the response only.
+        conn.send_text(r#"{"type":"scan_request","requestId":"abc"}"#)
+            .await;
+        wait_until("armed", Duration::from_secs(3), || c.slot.is_armed()).await;
+        let id = c.slot.take_for_scan(StdInstant::now());
+        c.handle.send_scan(&record(id.as_deref()), "Reception");
+        assert_eq!(conn.recv().await["type"], "scan_response");
+        conn.expect_silence(Duration::from_millis(500)).await;
+        assert_eq!(c.events.deliveries.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answering_scan_is_also_streamed() {
+        let mut server = TestServer::start(None).await;
+        let c = start(target(&server.url, "t", true, true));
+        let mut conn = server.accept().await;
+        conn.recv().await; // hello
+        conn.send_text(r#"{"type":"scan_request","requestId":"abc"}"#)
+            .await;
+        wait_until("armed", Duration::from_secs(3), || c.slot.is_armed()).await;
+
+        let id = c.slot.take_for_scan(StdInstant::now());
+        c.handle.send_scan(&record(id.as_deref()), "Reception");
+        let response = conn.recv().await;
+        assert_eq!(response["type"], "scan_response");
+        assert_eq!(response["requestId"], "abc");
+        let scan = conn.recv().await;
+        assert_eq!(scan["type"], "scan");
+        assert_eq!(scan["scanId"], response["scanId"]);
+        assert_eq!(scan.get("requestId"), None);
+
+        wait_until("delivery", Duration::from_secs(3), || {
+            !c.events.deliveries.lock().unwrap().is_empty()
+        })
+        .await;
+        conn.expect_silence(Duration::from_millis(300)).await;
+        let deliveries = c.events.deliveries.lock().unwrap().clone();
+        assert_eq!(deliveries.len(), 1);
+        assert!(deliveries[0].ok);
+        assert_eq!(deliveries[0].scan_id, "scan-1");
+        assert_eq!(deliveries[0].target, DeliveryTarget::Ws);
     }
 
     #[tokio::test(flavor = "multi_thread")]
