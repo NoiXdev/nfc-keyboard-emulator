@@ -1,5 +1,8 @@
 pub mod backoff;
 pub mod config;
+// Consumed by the import/export commands in a later task.
+#[allow(dead_code)]
+pub mod config_file;
 pub mod http;
 pub mod protocol;
 pub mod requests;

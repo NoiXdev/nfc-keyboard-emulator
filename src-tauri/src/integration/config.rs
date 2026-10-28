@@ -78,7 +78,7 @@ pub fn normalize(mut cfg: IntegrationConfig) -> Result<IntegrationConfig, Config
     Ok(cfg)
 }
 
-fn valid_url(value: &str, schemes: &[&str]) -> bool {
+pub(crate) fn valid_url(value: &str, schemes: &[&str]) -> bool {
     if value.is_empty() {
         return true;
     }

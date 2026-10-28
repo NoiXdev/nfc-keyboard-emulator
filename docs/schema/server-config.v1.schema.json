@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.noix.dev/nfc-keyboard-emulator/server-config.v1.schema.json",
+  "title": "NFC Keyboard Emulator server config",
+  "description": "Server connection settings for NFC Keyboard Emulator, imported as a file or through an nfc-keyboard-emulator://configure?config=<base64url(JSON)> link. Every key except format and version is optional: an absent key leaves that setting unchanged, and an explicit empty string clears it. Unknown keys are ignored.",
+  "type": "object",
+  "required": ["format", "version"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL of this schema. Ignored by the app."
+    },
+    "format": {
+      "const": "nfc-keyboard-emulator/server-config"
+    },
+    "version": {
+      "const": 1
+    },
+    "deviceName": {
+      "type": "string",
+      "description": "Name sent with every message so stations can be told apart. Empty means the OS host name."
+    },
+    "http": {
+      "type": "object",
+      "description": "HTTP push settings.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Send every scan to the URL."
+        },
+        "url": {
+          "type": "string",
+          "description": "Empty, or an http:// or https:// URL with a host.",
+          "pattern": "^(https?://[^/?#\\s]+.*)?$"
+        },
+        "token": {
+          "type": "string",
+          "description": "Sent as Authorization: Bearer <token>."
+        }
+      },
+      "additionalProperties": true
+    },
+    "ws": {
+      "type": "object",
+      "description": "WebSocket settings, shared by stream and request mode.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Empty, or a ws:// or wss:// URL with a host.",
+          "pattern": "^(wss?://[^/?#\\s]+.*)?$"
+        },
+        "token": {
+          "type": "string",
+          "description": "Sent as Authorization: Bearer <token> on the upgrade request."
+        },
+        "stream": {
+          "type": "boolean",
+          "description": "Send every scan over the WebSocket."
+        },
+        "request": {
+          "type": "boolean",
+          "description": "Answer scan requests sent by the server."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
