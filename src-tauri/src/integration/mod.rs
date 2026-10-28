@@ -73,8 +73,10 @@ impl IntegrationHub {
     }
 
     /// Hands the scan to its delivery targets (`rec.delivery_targets`, set by `route`).
-    /// HTTP runs on the async runtime and WebSocket sends are only enqueued.
-    pub fn dispatch(&self, rec: &ScanRecord) {
+    /// `integration` must be the snapshot `route` used, so a settings change in between
+    /// can not send the scan somewhere else. HTTP runs on the async runtime and WebSocket
+    /// sends are only enqueued.
+    pub fn dispatch(&self, rec: &ScanRecord, integration: &IntegrationConfig) {
         // A scan answering a request always goes to the WebSocket task: it sends the
         // response and publishes that the request is no longer pending.
         let answers_request = rec.request_id.as_deref().is_some_and(|id| !id.is_empty());
@@ -84,7 +86,6 @@ impl IntegrationHub {
             return;
         }
 
-        let integration = self.config.lock().unwrap().integration.clone();
         let device = integration.effective_device_name();
         if to_ws {
             self.ws.send_scan(rec, &device);
@@ -92,7 +93,7 @@ impl IntegrationHub {
         if to_http {
             let client = self.http.clone();
             let events = self.events.clone();
-            let target = integration.http;
+            let target = integration.http.clone();
             let scan_id = rec.scan_id.clone();
             let msg = ClientMessage::Scan {
                 protocol_version: PROTOCOL_VERSION,
@@ -294,13 +295,40 @@ mod tests {
 
         let mut rec = ok_record();
         rec.delivery_targets = route(&config.integration, &rec);
-        hub.dispatch(&rec);
+        hub.dispatch(&rec, &config.integration);
 
         let got = wait_for_deliveries(&events, 1);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].scan_id, "scan-1");
         assert_eq!(got[0].target, DeliveryTarget::Http);
         assert!(!got[0].ok);
+        assert!(matches!(
+            got[0].error,
+            Some(DeliveryError::Unreachable { .. })
+        ));
+    }
+
+    #[test]
+    fn dispatch_uses_the_routed_snapshot() {
+        // The settings were changed (HTTP cleared) after the scan was routed.
+        let events = Arc::new(Recorder::default());
+        let hub = IntegrationHub::new(
+            Arc::new(Mutex::new(Config::default())),
+            Arc::new(RequestSlot::default()),
+            events.clone(),
+            "1.2.3".into(),
+        );
+        let snapshot = IntegrationConfig {
+            http: http(true, &closed_port_url()),
+            ..Default::default()
+        };
+        let mut rec = ok_record();
+        rec.delivery_targets = route(&snapshot, &rec);
+        hub.dispatch(&rec, &snapshot);
+
+        let got = wait_for_deliveries(&events, 1);
+        assert_eq!(got.len(), 1);
+        // Sent to the snapshot's URL, not to the current (empty) one.
         assert!(matches!(
             got[0].error,
             Some(DeliveryError::Unreachable { .. })
@@ -316,7 +344,7 @@ mod tests {
             events.clone(),
             "1.2.3".into(),
         );
-        hub.dispatch(&ok_record());
+        hub.dispatch(&ok_record(), &IntegrationConfig::default());
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(events.deliveries.lock().unwrap().is_empty());
     }

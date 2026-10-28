@@ -65,7 +65,9 @@ struct TauriSink {
 impl WorkerSink for TauriSink {
     fn scan(&self, record: &ScanRecord) {
         let mut record = record.clone();
-        record.delivery_targets = route(&self.config.lock().unwrap().integration, &record);
+        // One snapshot per scan: routing and delivery must see the same settings.
+        let integration = self.config.lock().unwrap().integration.clone();
+        record.delivery_targets = route(&integration, &record);
         {
             let mut hist = self.history.lock().unwrap();
             hist.push_front(record.clone());
@@ -75,7 +77,7 @@ impl WorkerSink for TauriSink {
         }
         let _ = self.app.emit("scan", &record);
         // Only enqueues work: HTTP runs on the async runtime, the WebSocket task owns its socket.
-        self.hub.dispatch(&record);
+        self.hub.dispatch(&record, &integration);
     }
     fn readers_changed(&self, readers: &[String]) {
         *self.readers.lock().unwrap() = readers.to_vec();
