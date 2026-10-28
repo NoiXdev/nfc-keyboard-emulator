@@ -105,18 +105,30 @@ export type ImportSource = "file" | "link";
 
 export type TokenChange = "unchanged" | "set" | "cleared";
 
-/** What applying an import changes; tokens appear only as a TokenChange. */
+/**
+ * What applying an import changes; tokens appear only as a TokenChange. Hosts are
+ * `scheme://host[:port]` before and after the import.
+ */
 export interface ImportPreview {
   id: string;
   source: ImportSource;
   deviceName: string;
   httpEnabled: boolean;
-  httpHost: string | null;
+  httpHostBefore: string | null;
+  httpHostAfter: string | null;
   httpToken: TokenChange;
-  wsHost: string | null;
+  /** The stored token is kept but goes to another scheme or host. */
+  httpTokenToNewHost: boolean;
+  /** https becomes http. */
+  httpDowngrade: boolean;
+  wsHostBefore: string | null;
+  wsHostAfter: string | null;
   wsStream: boolean;
   wsRequest: boolean;
   wsToken: TokenChange;
+  wsTokenToNewHost: boolean;
+  /** wss becomes ws. */
+  wsDowngrade: boolean;
 }
 
 export type ReaderStatus =

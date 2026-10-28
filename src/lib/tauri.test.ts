@@ -13,12 +13,18 @@ const preview: ImportPreview = {
   source: "link",
   deviceName: "Reception",
   httpEnabled: true,
-  httpHost: "example.com",
+  httpHostBefore: null,
+  httpHostAfter: "https://example.com",
   httpToken: "set",
-  wsHost: null,
+  httpTokenToNewHost: false,
+  httpDowngrade: false,
+  wsHostBefore: null,
+  wsHostAfter: null,
   wsStream: false,
   wsRequest: false,
   wsToken: "unchanged",
+  wsTokenToNewHost: false,
+  wsDowngrade: false,
 };
 
 describe("onImportPreview", () => {

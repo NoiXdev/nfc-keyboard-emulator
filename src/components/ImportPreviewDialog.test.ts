@@ -11,12 +11,18 @@ const preview: ImportPreview = {
   source: "link",
   deviceName: "Reception",
   httpEnabled: true,
-  httpHost: "api.example.com:8443",
+  httpHostBefore: "https://api.example.com:8443",
+  httpHostAfter: "https://api.example.com:8443",
   httpToken: "set",
-  wsHost: "ws.example.com",
+  httpTokenToNewHost: false,
+  httpDowngrade: false,
+  wsHostBefore: "wss://ws.example.com",
+  wsHostAfter: "wss://ws.example.com",
   wsStream: true,
   wsRequest: false,
   wsToken: "unchanged",
+  wsTokenToNewHost: false,
+  wsDowngrade: false,
 };
 
 const render = (p: ImportPreview = preview) =>
@@ -27,8 +33,8 @@ describe("ImportPreviewDialog", () => {
     const text = render().text();
     expect(text).toContain(t("import.sourceLink"));
     expect(text).toContain("Reception");
-    expect(text).toContain("api.example.com:8443");
-    expect(text).toContain("ws.example.com");
+    expect(text).toContain("https://api.example.com:8443");
+    expect(text).toContain("wss://ws.example.com");
     expect(text).toContain(t("import.on"));
     expect(text).toContain(t("import.off"));
   });
@@ -41,9 +47,51 @@ describe("ImportPreviewDialog", () => {
   });
 
   it("shows a placeholder for a missing host and the file source", () => {
-    const w = render({ ...preview, source: "file", httpHost: null, wsHost: null });
+    const w = render({
+      ...preview,
+      source: "file",
+      httpHostBefore: null,
+      httpHostAfter: null,
+      wsHostBefore: null,
+      wsHostAfter: null,
+    });
     expect(w.text()).toContain(t("import.sourceFile"));
     expect(w.text()).toContain(t("import.noHost"));
+  });
+
+  it("shows no warning and no before value while hosts stay the same", () => {
+    const w = render();
+    expect(w.find('[data-test="warnings"]').exists()).toBe(false);
+    expect(w.find(".before").exists()).toBe(false);
+    expect(w.get('[data-test="http-host"]').classes()).not.toContain("changed");
+  });
+
+  it("shows a changed host as before and after", () => {
+    const w = render({ ...preview, wsHostAfter: "wss://new.example", wsToken: "set" });
+    const host = w.get('[data-test="ws-host"]');
+    expect(host.classes()).toContain("changed");
+    expect(host.get(".before").text()).toBe("wss://ws.example.com");
+    expect(host.text()).toContain("wss://new.example");
+    expect(w.get('[data-test="ws-token"]').classes()).toContain("changed");
+    expect(w.find('[data-test="warnings"]').exists()).toBe(false);
+  });
+
+  it("warns when the stored token goes to a new host", () => {
+    const w = render({
+      ...preview,
+      wsHostAfter: "wss://evil.example",
+      wsTokenToNewHost: true,
+    });
+    expect(w.get('[data-test="warnings"]').text()).toContain(
+      t("import.warnTokenToNewHost", { target: t("import.targetWs"), host: "wss://evil.example" }),
+    );
+  });
+
+  it("warns about a downgrade to an unencrypted connection", () => {
+    const w = render({ ...preview, httpHostAfter: "http://api.example.com:8443", httpDowngrade: true });
+    const warnings = w.get('[data-test="warnings"]');
+    expect(warnings.attributes("role")).toBe("alert");
+    expect(warnings.text()).toContain(t("import.warnDowngrade", { target: t("import.targetHttp") }));
   });
 
   it("never renders a token field", () => {

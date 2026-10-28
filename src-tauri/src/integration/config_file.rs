@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::config::{valid_url, IntegrationConfig};
+use super::http::origin_of;
 
 pub const FORMAT_ID: &str = "nfc-keyboard-emulator/server-config";
 pub const FORMAT_VERSION: u32 = 1;
@@ -255,7 +256,8 @@ pub enum TokenChange {
     Cleared,
 }
 
-/// What the import dialog shows. Values describe the state after applying; no tokens.
+/// What the import dialog shows. Values describe the state after applying, hosts also the
+/// state before (as `scheme://host[:port]`); no tokens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPreview {
@@ -263,12 +265,22 @@ pub struct ImportPreview {
     pub source: ImportSource,
     pub device_name: String,
     pub http_enabled: bool,
-    pub http_host: Option<String>,
+    pub http_host_before: Option<String>,
+    pub http_host_after: Option<String>,
     pub http_token: TokenChange,
-    pub ws_host: Option<String>,
+    /// The stored, non-empty HTTP token is kept but goes to another scheme or host.
+    pub http_token_to_new_host: bool,
+    /// `https` becomes `http`.
+    pub http_downgrade: bool,
+    pub ws_host_before: Option<String>,
+    pub ws_host_after: Option<String>,
     pub ws_stream: bool,
     pub ws_request: bool,
     pub ws_token: TokenChange,
+    /// The stored, non-empty WebSocket token is kept but goes to another scheme or host.
+    pub ws_token_to_new_host: bool,
+    /// `wss` becomes `ws`.
+    pub ws_downgrade: bool,
 }
 
 pub fn preview(
@@ -279,17 +291,59 @@ pub fn preview(
     let after = apply(current, f);
     let http_token = f.http.as_ref().and_then(|h| h.token.as_deref());
     let ws_token = f.ws.as_ref().and_then(|w| w.token.as_deref());
+    let http = HostChange::new(
+        (&current.http.url, &current.http.token),
+        (&after.http.url, &after.http.token),
+        "https",
+    );
+    let ws = HostChange::new(
+        (&current.ws.url, &current.ws.token),
+        (&after.ws.url, &after.ws.token),
+        "wss",
+    );
     ImportPreview {
         id: uuid::Uuid::new_v4().to_string(),
         source,
         device_name: after.effective_device_name(),
         http_enabled: after.http.enabled,
-        http_host: host_port(&after.http.url),
+        http_host_before: http.before,
+        http_host_after: http.after,
         http_token: token_change(&current.http.token, http_token),
-        ws_host: host_port(&after.ws.url),
+        http_token_to_new_host: http.token_to_new_host,
+        http_downgrade: http.downgrade,
+        ws_host_before: ws.before,
+        ws_host_after: ws.after,
         ws_stream: after.ws.stream,
         ws_request: after.ws.request,
         ws_token: token_change(&current.ws.token, ws_token),
+        ws_token_to_new_host: ws.token_to_new_host,
+        ws_downgrade: ws.downgrade,
+    }
+}
+
+/// What an import does to one target's address.
+struct HostChange {
+    before: Option<String>,
+    after: Option<String>,
+    token_to_new_host: bool,
+    downgrade: bool,
+}
+
+impl HostChange {
+    /// `before` and `after` are `(url, token)`; `secure` is the scheme that encrypts.
+    fn new(before: (&str, &str), after: (&str, &str), secure: &str) -> Self {
+        let old = Url::parse(before.0).ok().filter(Url::has_host);
+        let new = Url::parse(after.0).ok().filter(Url::has_host);
+        let old_origin = old.as_ref().map(origin_of);
+        let new_origin = new.as_ref().map(origin_of);
+        let token_kept = !before.1.is_empty() && after.1 == before.1;
+        Self {
+            token_to_new_host: token_kept && new_origin.is_some() && new_origin != old_origin,
+            downgrade: old.is_some_and(|u| u.scheme() == secure)
+                && new.is_some_and(|u| u.scheme() != secure),
+            before: old_origin,
+            after: new_origin,
+        }
     }
 }
 
@@ -300,16 +354,6 @@ fn token_change(current: &str, incoming: Option<&str>) -> TokenChange {
         Some("") => TokenChange::Cleared,
         Some(_) => TokenChange::Set,
     }
-}
-
-/// `host[:port]` of a URL, without scheme, credentials, path or query.
-fn host_port(url: &str) -> Option<String> {
-    let u = Url::parse(url).ok()?;
-    let host = u.host_str()?;
-    Some(match u.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_string(),
-    })
 }
 
 #[cfg(test)]
@@ -520,9 +564,14 @@ mod tests {
         assert_eq!(p.source, ImportSource::Link);
         assert_eq!(p.device_name, "Kiosk");
         assert!(p.http_enabled);
-        assert_eq!(p.http_host.as_deref(), Some("new.example.com:9000"));
+        assert_eq!(p.http_host_before.as_deref(), Some("https://example.com"));
+        assert_eq!(
+            p.http_host_after.as_deref(),
+            Some("https://new.example.com:9000")
+        );
         assert_eq!(p.http_token, TokenChange::Set);
-        assert_eq!(p.ws_host.as_deref(), Some("example.com:8443"));
+        assert_eq!(p.ws_host_before.as_deref(), Some("wss://example.com:8443"));
+        assert_eq!(p.ws_host_after.as_deref(), Some("wss://example.com:8443"));
         assert!(!p.ws_stream && p.ws_request);
         assert_eq!(p.ws_token, TokenChange::Cleared);
         assert!(!p.id.is_empty());
@@ -565,8 +614,107 @@ mod tests {
             parse_config_file(r#"{"format":"nfc-keyboard-emulator/server-config","version":1}"#)
                 .unwrap();
         let p = preview(&IntegrationConfig::default(), &f, ImportSource::File);
-        assert_eq!(p.http_host, None);
-        assert_eq!(p.ws_host, None);
+        assert_eq!(p.http_host_before, None);
+        assert_eq!(p.http_host_after, None);
+        assert_eq!(p.ws_host_before, None);
+        assert_eq!(p.ws_host_after, None);
+        assert!(!p.http_token_to_new_host && !p.ws_token_to_new_host);
+    }
+
+    fn preview_of(current: &IntegrationConfig, body: &str) -> ImportPreview {
+        let text =
+            format!(r#"{{"format":"nfc-keyboard-emulator/server-config","version":1,{body}}}"#);
+        preview(
+            current,
+            &parse_config_file(&text).unwrap(),
+            ImportSource::Link,
+        )
+    }
+
+    #[test]
+    fn preview_without_host_change_has_no_warning() {
+        let p = preview_of(
+            &sample(),
+            r#""http":{"url":"https://example.com/other/path"},"ws":{"stream":false}"#,
+        );
+        assert_eq!(p.http_host_before, p.http_host_after);
+        assert_eq!(p.ws_host_before, p.ws_host_after);
+        assert!(!p.http_token_to_new_host && !p.http_downgrade);
+        assert!(!p.ws_token_to_new_host && !p.ws_downgrade);
+    }
+
+    #[test]
+    fn preview_warns_when_kept_token_goes_to_new_host() {
+        let p = preview_of(
+            &sample(),
+            r#""http":{"url":"https://evil.example/hook"},"ws":{"url":"wss://evil.example/ws"}"#,
+        );
+        assert_eq!(p.http_host_after.as_deref(), Some("https://evil.example"));
+        assert_eq!(p.http_token, TokenChange::Unchanged);
+        assert!(p.http_token_to_new_host);
+        assert!(p.ws_token_to_new_host);
+        assert!(!p.http_downgrade && !p.ws_downgrade);
+
+        // Repeating the stored token in the file still sends it to the new host.
+        let p = preview_of(
+            &sample(),
+            r#""http":{"url":"https://evil.example/hook","token":"http-secret"}"#,
+        );
+        assert!(p.http_token_to_new_host);
+
+        // A port change is a new host as well.
+        let p = preview_of(
+            &sample(),
+            r#""ws":{"url":"wss://example.com:9443/scanner"}"#,
+        );
+        assert!(p.ws_token_to_new_host);
+    }
+
+    #[test]
+    fn preview_warns_on_scheme_downgrade() {
+        let p = preview_of(
+            &sample(),
+            r#""http":{"url":"http://example.com/api/scans"},"ws":{"url":"ws://example.com:8443/scanner"}"#,
+        );
+        assert!(p.http_downgrade && p.ws_downgrade);
+        // The scheme is part of the address, so the kept token is flagged too.
+        assert!(p.http_token_to_new_host && p.ws_token_to_new_host);
+
+        // An upgrade is not a downgrade, and clearing the URL sends nothing.
+        let mut current = sample();
+        current.http.url = "http://example.com/api".into();
+        let p = preview_of(
+            &current,
+            r#""http":{"url":"https://example.com/api"},"ws":{"url":""}"#,
+        );
+        assert!(!p.http_downgrade);
+        assert!(!p.ws_downgrade && !p.ws_token_to_new_host);
+        assert_eq!(p.ws_host_after, None);
+    }
+
+    #[test]
+    fn preview_new_host_with_new_token_shows_change_without_warning() {
+        let p = preview_of(
+            &sample(),
+            r#""http":{"url":"https://new.example/hook","token":"fresh"}"#,
+        );
+        assert_eq!(p.http_host_before.as_deref(), Some("https://example.com"));
+        assert_eq!(p.http_host_after.as_deref(), Some("https://new.example"));
+        assert_eq!(p.http_token, TokenChange::Set);
+        assert!(!p.http_token_to_new_host);
+
+        // Without a stored token there is nothing to redirect.
+        let mut current = sample();
+        current.http.token = String::new();
+        let p = preview_of(&current, r#""http":{"url":"https://new.example/hook"}"#);
+        assert!(!p.http_token_to_new_host);
+
+        // A first URL with an already stored token counts as a new host.
+        current.http.url = String::new();
+        current.http.token = "kept".into();
+        let p = preview_of(&current, r#""http":{"url":"https://new.example/hook"}"#);
+        assert_eq!(p.http_host_before, None);
+        assert!(p.http_token_to_new_host);
     }
 
     #[test]
