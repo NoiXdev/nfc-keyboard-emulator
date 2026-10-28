@@ -2264,6 +2264,7 @@ dependencies = [
  "chrono",
  "csv",
  "enigo",
+ "gethostname",
  "macos-accessibility-client",
  "pcsc",
  "serde",
@@ -2277,6 +2278,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-store",
+ "url",
 ]
 
 [[package]]

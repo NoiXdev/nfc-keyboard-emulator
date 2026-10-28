@@ -13,6 +13,25 @@ export interface FormatConfig {
   suffix: Suffix;
 }
 
+export interface HttpTarget {
+  enabled: boolean;
+  url: string;
+  token: string;
+}
+
+export interface WsTarget {
+  url: string;
+  token: string;
+  stream: boolean;
+  request: boolean;
+}
+
+export interface IntegrationConfig {
+  deviceName: string;
+  http: HttpTarget;
+  ws: WsTarget;
+}
+
 export interface Config {
   selectedReader: string | null;
   typingEnabledOnStart: boolean;
@@ -20,6 +39,7 @@ export interface Config {
   startMinimized: boolean;
   autostart: boolean;
   logRetention: number;
+  integration: IntegrationConfig;
 }
 
 export type ScanStatus =

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::integration::config::IntegrationConfig;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Case {
@@ -56,6 +58,7 @@ pub struct Config {
     pub start_minimized: bool,
     pub autostart: bool,
     pub log_retention: usize,
+    pub integration: IntegrationConfig,
 }
 
 impl Default for Config {
@@ -67,6 +70,7 @@ impl Default for Config {
             start_minimized: false,
             autostart: false,
             log_retention: 500,
+            integration: IntegrationConfig::default(),
         }
     }
 }

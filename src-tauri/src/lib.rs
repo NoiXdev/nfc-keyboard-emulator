@@ -3,6 +3,9 @@ mod commands;
 mod config;
 mod csv_export;
 mod formatter;
+// Consumed by later server-integration tasks; drop the allow once wired up.
+#[allow(dead_code)]
+mod integration;
 mod pipeline;
 mod reader;
 mod reader_pcsc;
