@@ -1,4 +1,12 @@
-import type { DeliveryError, DeliveryResult, DeliveryTarget, ScanRecord } from "./tauri";
+import type {
+  ConfigError,
+  DeliveryError,
+  DeliveryResult,
+  DeliveryTarget,
+  ImportError,
+  ScanRecord,
+  WsStatus,
+} from "./tauri";
 
 export type DeliveryState =
   | { state: "pending" }
@@ -38,4 +46,25 @@ export function deliveryErrorText(t: Translate, e: DeliveryError): string {
     default:
       return t(`delivery.error.${e.kind}`);
   }
+}
+
+/** Translated text for a failed save or import; never the raw backend message. */
+export function serverErrorText(t: Translate, e: ConfigError | ImportError): string {
+  if (e.kind === "unsupported_version") {
+    return t("server.error.unsupported_version", { version: e.version });
+  }
+  return t(`server.error.${e.kind}`);
+}
+
+export type WsNotice = { kind: "reconnecting"; error: DeliveryError } | { kind: "token_rejected" };
+
+/** The websocket transitions worth a notification; repeats of the same state are quiet. */
+export function wsNotice(prev: WsStatus | null, next: WsStatus): WsNotice | null {
+  if (next.state === "token_rejected" && prev?.state !== "token_rejected") {
+    return { kind: "token_rejected" };
+  }
+  if (next.state === "reconnecting" && prev?.state === "connected") {
+    return { kind: "reconnecting", error: next.error };
+  }
+  return null;
 }

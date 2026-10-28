@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { applyDelivery, deliveryErrorText, withPendingDelivery, type LoggedScan } from "./delivery";
+import {
+  applyDelivery,
+  deliveryErrorText,
+  serverErrorText,
+  withPendingDelivery,
+  wsNotice,
+  type LoggedScan,
+} from "./delivery";
 import { i18n } from "../i18n";
-import type { DeliveryError, ScanRecord } from "./tauri";
+import type { ConfigError, DeliveryError, ImportError, ScanRecord, WsStatus } from "./tauri";
 
 const rec = (scanId: string, deliveryTargets: ScanRecord["deliveryTargets"]): ScanRecord => ({
   timestamp: "2026-06-19T20:15:00Z",
@@ -84,5 +91,64 @@ describe("deliveryErrorText", () => {
     expect(deliveryErrorText(t, { kind: "unreachable", message: "connection refused" })).toContain(
       "connection refused",
     );
+  });
+});
+
+describe("serverErrorText", () => {
+  const t = i18n.global.t;
+  const errors: Array<ConfigError | ImportError> = [
+    { kind: "invalid_json", message: "expected value at line 1" },
+    { kind: "wrong_format" },
+    { kind: "unsupported_version", version: 7 },
+    { kind: "invalid_http_url" },
+    { kind: "invalid_ws_url" },
+    { kind: "invalid_link" },
+  ];
+
+  it.each(errors)("translates $kind without leaking key names", (e) => {
+    const text = serverErrorText(t, e);
+    expect(text).not.toContain("server.error");
+    expect(text.length).toBeGreaterThan(0);
+  });
+
+  it("never shows the raw invalid_json message", () => {
+    const text = serverErrorText(t, { kind: "invalid_json", message: "expected value at line 1" });
+    expect(text).not.toContain("expected value");
+  });
+
+  it("interpolates the unsupported version", () => {
+    expect(serverErrorText(t, { kind: "unsupported_version", version: 7 })).toContain("7");
+  });
+});
+
+describe("wsNotice", () => {
+  const status = (s: WsStatus["state"], extra: object = {}): WsStatus =>
+    ({ state: s, requestPending: false, ...extra }) as WsStatus;
+  const reconnecting = status("reconnecting", { error: { kind: "timeout" } });
+
+  it("flags connected to reconnecting with the error", () => {
+    expect(wsNotice(status("connected"), reconnecting)).toEqual({
+      kind: "reconnecting",
+      error: { kind: "timeout" },
+    });
+  });
+
+  it("ignores reconnecting while already reconnecting or connecting", () => {
+    expect(wsNotice(reconnecting, reconnecting)).toBeNull();
+    expect(wsNotice(status("connecting"), reconnecting)).toBeNull();
+    expect(wsNotice(null, reconnecting)).toBeNull();
+  });
+
+  it("flags token_rejected from any state once", () => {
+    expect(wsNotice(status("connecting"), status("token_rejected"))).toEqual({
+      kind: "token_rejected",
+    });
+    expect(wsNotice(null, status("token_rejected"))).toEqual({ kind: "token_rejected" });
+    expect(wsNotice(status("token_rejected"), status("token_rejected", { requestPending: true }))).toBeNull();
+  });
+
+  it("is quiet for other transitions", () => {
+    expect(wsNotice(status("connecting"), status("connected"))).toBeNull();
+    expect(wsNotice(status("connected"), status("off"))).toBeNull();
   });
 });

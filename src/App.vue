@@ -8,14 +8,29 @@ import {
   onReaderStatus,
   onDelivery,
   onWsStatus,
+  onWsRequest,
+  onImportPreview,
+  onImportError,
   type Config,
+  type ConfigError,
+  type DeliveryResult,
   type FormatConfig,
+  type ImportError,
+  type ImportPreview,
+  type IntegrationConfig,
   type ReaderStatus,
   type ScanRecord,
   type WsStatus,
 } from "./lib/tauri";
 import { pushScan } from "./lib/scanLog";
-import { applyDelivery, withPendingDelivery, type LoggedScan } from "./lib/delivery";
+import {
+  applyDelivery,
+  deliveryErrorText,
+  serverErrorText,
+  withPendingDelivery,
+  wsNotice,
+  type LoggedScan,
+} from "./lib/delivery";
 import { type NavView } from "./lib/nav";
 import { setLocale, type Locale } from "./i18n";
 import { checkForUpdate, type UpdateInfo } from "./lib/update";
@@ -25,6 +40,8 @@ import TypingToggle from "./components/TypingToggle.vue";
 import FormatSettings from "./components/FormatSettings.vue";
 import ScanLog from "./components/ScanLog.vue";
 import StatusBar from "./components/StatusBar.vue";
+import ServerSettings from "./components/ServerSettings.vue";
+import ImportPreviewDialog from "./components/ImportPreviewDialog.vue";
 import AccessibilityPanel from "./components/AccessibilityPanel.vue";
 import AboutPanel from "./components/AboutPanel.vue";
 import Toggle from "./components/Toggle.vue";
@@ -47,6 +64,9 @@ const readers = ref<string[]>([]);
 const scans = ref<LoggedScan[]>([]);
 const status = ref<ReaderStatus | null>(null);
 const ws = ref<WsStatus | null>(null);
+const saveError = ref<ConfigError | null>(null);
+const pendingImport = ref<ImportPreview | null>(null);
+const importError = ref<ImportError | null>(null);
 const typing = ref(false);
 const accessibilityOk = ref(true);
 const activeView = ref<NavView>("scanner");
@@ -126,6 +146,33 @@ function notifyForScan(r: ScanRecord) {
   void sendNotification({ title, body });
 }
 
+// Delivery and connection problems count as errors: shown unless notifications are off.
+// Text carries the target and the translated reason only, never a URL path or token.
+function notifyServer(title: string, body: string) {
+  if (notifyMode.value === "off" || !notifyAllowed) return;
+  void sendNotification({ title, body });
+}
+function notifyDelivery(r: DeliveryResult) {
+  if (r.ok) return;
+  const target = t(r.target === "http" ? "notify.targetHttp" : "notify.targetWs");
+  const error = deliveryErrorText(t, r.error ?? { kind: "unreachable", message: "" });
+  notifyServer(t("notify.deliveryFailed"), t("notify.serverBody", { target, error }));
+}
+function notifyWsStatus(prev: WsStatus | null, next: WsStatus) {
+  const notice = wsNotice(prev, next);
+  if (notice?.kind === "reconnecting") {
+    notifyServer(
+      t("notify.serverConnectionLost"),
+      t("notify.serverBody", {
+        target: t("notify.targetWs"),
+        error: deliveryErrorText(t, notice.error),
+      }),
+    );
+  } else if (notice?.kind === "token_rejected") {
+    notifyServer(t("notify.serverTokenRejected"), t("notify.serverTokenRejectedBody"));
+  }
+}
+
 onMounted(async () => {
   config.value = await api.getConfig();
   typing.value = config.value.typingEnabledOnStart;
@@ -139,8 +186,24 @@ onMounted(async () => {
   );
   unlisten.push(await onReadersChanged((r) => (readers.value = r)));
   unlisten.push(await onReaderStatus((s) => (status.value = s)));
-  unlisten.push(await onDelivery((r) => (scans.value = applyDelivery(scans.value, r))));
-  unlisten.push(await onWsStatus((s) => (ws.value = s)));
+  unlisten.push(
+    await onDelivery((r) => {
+      scans.value = applyDelivery(scans.value, r);
+      notifyDelivery(r);
+    }),
+  );
+  unlisten.push(
+    await onWsStatus((s) => {
+      notifyWsStatus(ws.value, s);
+      ws.value = s;
+    }),
+  );
+  unlisten.push(
+    await onWsRequest(() => notifyServer(t("notify.serverRequest"), t("notify.serverWaiting"))),
+  );
+  // The same preview can arrive twice (replay after subscribing and the live event).
+  unlisten.push(await onImportPreview((p) => (pendingImport.value = p)));
+  unlisten.push(await onImportError((e) => (importError.value = e)));
   // An event that arrived while the snapshot was in flight is newer than the snapshot.
   const snapshot = await api.getWsStatus();
   ws.value ??= snapshot;
@@ -178,6 +241,38 @@ async function toggleAutostart(v: boolean) {
 function toggleStartMinimized(v: boolean) {
   startMinimized.value = v;
   api.setStartMinimized(v);
+}
+async function saveIntegration(integration: IntegrationConfig) {
+  saveError.value = null;
+  try {
+    config.value!.integration = (await api.updateIntegration(integration)).integration;
+  } catch (e) {
+    saveError.value = e as ConfigError;
+  }
+}
+async function exportServerConfig() {
+  await api.exportServerConfig();
+}
+async function importServerConfig() {
+  importError.value = null;
+  try {
+    const preview = await api.importServerConfig();
+    if (preview) pendingImport.value = preview;
+  } catch (e) {
+    importError.value = e as ImportError;
+  }
+}
+async function applyImport(id: string) {
+  pendingImport.value = null;
+  try {
+    config.value = await api.applyImport(id);
+  } catch (e) {
+    importError.value = e as ImportError;
+  }
+}
+function cancelImport(id: string) {
+  pendingImport.value = null;
+  void api.discardImport(id).catch(() => {});
 }
 function changeLanguage(v: string) {
   setLocale(v as Locale);
@@ -250,6 +345,17 @@ function changeLanguage(v: string) {
           </div>
         </template>
 
+        <ServerSettings
+          v-else-if="activeView === 'server'"
+          :integration="config.integration"
+          :ws="ws"
+          :save-error="saveError"
+          @save="saveIntegration"
+          @export="exportServerConfig"
+          @import="importServerConfig"
+          @reconnect="api.wsReconnect()"
+        />
+
         <AccessibilityPanel
           v-else-if="activeView === 'accessibility'"
           :ok="accessibilityOk"
@@ -265,6 +371,24 @@ function changeLanguage(v: string) {
       </div>
 
       <StatusBar :status="status" :typing="typing" :ws="ws" />
+    </div>
+
+    <ImportPreviewDialog
+      v-if="pendingImport"
+      :key="pendingImport.id"
+      :preview="pendingImport"
+      @apply="applyImport"
+      @cancel="cancelImport"
+    />
+
+    <div v-if="importError" class="notice-overlay">
+      <div class="notice" role="alertdialog" aria-modal="true" aria-labelledby="import-error-title">
+        <h2 id="import-error-title">{{ t("import.errorTitle") }}</h2>
+        <p>{{ serverErrorText(t, importError) }}</p>
+        <button type="button" class="dismiss" @click="importError = null">
+          {{ t("import.dismiss") }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -334,5 +458,41 @@ body {
 }
 .lang {
   max-width: 220px;
+}
+.notice-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 32, 48, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10;
+}
+.notice {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+}
+.notice h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+.notice p {
+  margin: 0;
+  font-size: 14px;
+}
+.dismiss {
+  justify-self: end;
+  padding: 8px 14px;
+  border: 1px solid #d4d9e6;
+  border-radius: 8px;
+  background: #f4f5fa;
+  font-size: 14px;
+  cursor: pointer;
 }
 </style>

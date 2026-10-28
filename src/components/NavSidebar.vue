@@ -55,6 +55,12 @@ const { t } = useI18n();
               <line x1="4" y1="16" x2="20" y2="16" />
               <circle cx="15" cy="16" r="2.2" />
             </template>
+            <template v-else-if="item === 'server'">
+              <rect x="4" y="4" width="16" height="6" rx="1.5" />
+              <rect x="4" y="14" width="16" height="6" rx="1.5" />
+              <line x1="8" y1="7" x2="8.01" y2="7" />
+              <line x1="8" y1="17" x2="8.01" y2="17" />
+            </template>
             <template v-else>
               <circle cx="12" cy="5" r="1.4" />
               <path d="M5 9h14M12 9v6M9 21l3-6 3 6" />

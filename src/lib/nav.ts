@@ -1,4 +1,4 @@
-export type NavView = "scanner" | "log" | "options" | "accessibility" | "about";
+export type NavView = "scanner" | "log" | "options" | "server" | "accessibility" | "about";
 
 export interface NavGroup {
   groupKey: "groupScanner" | "groupSettings";
@@ -7,5 +7,5 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   { groupKey: "groupScanner", items: ["scanner", "log"] },
-  { groupKey: "groupSettings", items: ["options", "accessibility"] },
+  { groupKey: "groupSettings", items: ["options", "server", "accessibility"] },
 ];
