@@ -125,13 +125,18 @@ describe("serverErrorText", () => {
 describe("wsNotice", () => {
   const status = (s: WsStatus["state"], extra: object = {}): WsStatus =>
     ({ state: s, requestPending: false, ...extra }) as WsStatus;
-  const reconnecting = status("reconnecting", { error: { kind: "timeout" } });
+  const reconnecting = status("reconnecting", { error: { kind: "timeout" }, lost: true });
 
   it("flags connected to reconnecting with the error", () => {
     expect(wsNotice(status("connected"), reconnecting)).toEqual({
       kind: "reconnecting",
       error: { kind: "timeout" },
     });
+  });
+
+  it("stays quiet for drops the backend does not mark as lost", () => {
+    const repeated = status("reconnecting", { error: { kind: "timeout" }, lost: false });
+    expect(wsNotice(status("connected"), repeated)).toBeNull();
   });
 
   it("ignores reconnecting while already reconnecting or connecting", () => {

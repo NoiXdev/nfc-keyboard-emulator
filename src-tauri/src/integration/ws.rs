@@ -44,7 +44,12 @@ pub enum WsState {
     Off,
     Connecting,
     Connected,
-    Reconnecting { error: DeliveryError },
+    /// `lost` marks the drop worth announcing: the first one after a fresh start or after
+    /// a stable session. A server that keeps accepting and closing is announced once.
+    Reconnecting {
+        error: DeliveryError,
+        lost: bool,
+    },
     TokenRejected,
 }
 
@@ -62,10 +67,12 @@ pub trait WsEvents: Send + Sync + 'static {
     fn request_armed(&self, request_id: &str);
 }
 
-/// Keepalive ping and request-expiry periods; injectable so tests do not wait 30 s.
+/// Keepalive, stability and request-expiry periods; injectable so tests do not wait 30 s.
 #[derive(Debug, Clone, Copy)]
 struct WsTimings {
     ping: Duration,
+    /// A session that stayed up this long resets the backoff and the "lost" announcement.
+    stable: Duration,
     tick: Duration,
 }
 
@@ -73,6 +80,7 @@ impl Default for WsTimings {
     fn default() -> Self {
         Self {
             ping: Duration::from_secs(30),
+            stable: Duration::from_secs(30),
             tick: Duration::from_secs(1),
         }
     }
@@ -175,6 +183,8 @@ enum Phase {
         fresh: bool,
     },
     Retry(DeliveryError),
+    /// Like `Retry`, after a drop that is announced as `lost`.
+    Lost(DeliveryError),
     Rejected,
 }
 
@@ -220,6 +230,8 @@ struct Connection {
 impl Connection {
     async fn run(mut self) {
         let mut backoff = Backoff::new();
+        // Set once a drop was announced; only a stable session or a fresh start clears it.
+        let mut drop_announced = false;
         let mut phase = if self.settings.target.active() {
             Phase::Connect { fresh: true }
         } else {
@@ -235,20 +247,31 @@ impl Connection {
                     self.publish(WsState::TokenRejected);
                     self.idle(Idle::Rejected, None).await
                 }
-                Phase::Retry(error) => {
-                    self.publish(WsState::Reconnecting { error });
-                    let delay = backoff.next_delay(jitter());
-                    self.idle(Idle::Retry, Some(delay)).await
-                }
+                Phase::Retry(error) => self.retry(&mut backoff, error, false).await,
+                Phase::Lost(error) => self.retry(&mut backoff, error, true).await,
                 Phase::Connect { fresh } => {
                     if fresh {
                         backoff.reset();
+                        drop_announced = false;
                         self.publish(WsState::Connecting);
                     }
                     match self.attempt().await {
                         Some(Attempt::Connected(ws, origin)) => {
-                            backoff.reset();
-                            self.session(*ws, &origin).await
+                            let started = tokio::time::Instant::now();
+                            let next = self.session(*ws, &origin).await;
+                            // Only a session that stayed up counts as recovered; a server
+                            // that accepts and closes at once keeps backing off.
+                            if started.elapsed() >= self.timings.stable {
+                                backoff.reset();
+                                drop_announced = false;
+                            }
+                            match next {
+                                Some(Phase::Retry(error)) if !drop_announced => {
+                                    drop_announced = true;
+                                    Some(Phase::Lost(error))
+                                }
+                                next => next,
+                            }
                         }
                         Some(Attempt::Failed(DeliveryError::TokenRejected { .. })) => {
                             Some(Phase::Rejected)
@@ -267,6 +290,17 @@ impl Connection {
                 None => return,
             }
         }
+    }
+
+    async fn retry(
+        &mut self,
+        backoff: &mut Backoff,
+        error: DeliveryError,
+        lost: bool,
+    ) -> Option<Phase> {
+        self.publish(WsState::Reconnecting { error, lost });
+        let delay = backoff.next_delay(jitter());
+        self.idle(Idle::Retry, Some(delay)).await
     }
 
     /// Waits while not connected (and, for `Retry`, until `wake` has passed). Returns the
@@ -672,6 +706,7 @@ mod tests {
 
     const TEST_TIMINGS: WsTimings = WsTimings {
         ping: Duration::from_secs(30),
+        stable: Duration::from_secs(30),
         tick: Duration::from_millis(100),
     };
 
@@ -1063,6 +1098,51 @@ mod tests {
         wait_connected(&c).await;
     }
 
+    fn lost_count(c: &Client) -> usize {
+        c.events
+            .statuses
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| matches!(s.state, WsState::Reconnecting { lost: true, .. }))
+            .count()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unstable_sessions_back_off_and_are_announced_once() {
+        let mut server = TestServer::start(None).await;
+        let timings = WsTimings {
+            stable: Duration::from_millis(300),
+            ..TEST_TIMINGS
+        };
+        let c = start_with(target(&server.url, "t", true, false), timings);
+
+        // A server that accepts and closes at once: the delays keep growing (1 s, 2 s).
+        let mut accepted = Vec::new();
+        for _ in 0..3 {
+            let conn = server.accept().await;
+            accepted.push(StdInstant::now());
+            if accepted.len() < 3 {
+                conn.close().await;
+                continue;
+            }
+            assert!(
+                accepted[2] - accepted[1] >= Duration::from_millis(1500),
+                "backoff was reset by an unstable session"
+            );
+            assert_eq!(lost_count(&c), 1);
+
+            // A session that stays up resets the backoff and the announcement.
+            wait_connected(&c).await;
+            tokio::time::sleep(timings.stable * 2).await;
+            conn.close().await;
+        }
+        let closed = StdInstant::now();
+        let _conn = server.accept().await;
+        assert!(closed.elapsed() < Duration::from_millis(2500));
+        assert_eq!(lost_count(&c), 2);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn pings_while_connected() {
         let mut server = TestServer::start(None).await;
@@ -1190,12 +1270,13 @@ mod tests {
         let s = WsStatus {
             state: WsState::Reconnecting {
                 error: DeliveryError::Timeout,
+                lost: true,
             },
             request_pending: false,
         };
         assert_eq!(
             serde_json::to_value(&s).unwrap(),
-            serde_json::json!({"state": "reconnecting", "error": {"kind": "timeout"}, "requestPending": false})
+            serde_json::json!({"state": "reconnecting", "error": {"kind": "timeout"}, "lost": true, "requestPending": false})
         );
         let s = WsStatus {
             state: WsState::TokenRejected,

@@ -85,7 +85,8 @@ export type WsState =
   | { state: "off" }
   | { state: "connecting" }
   | { state: "connected" }
-  | { state: "reconnecting"; error: DeliveryError }
+  /** `lost` marks the drop worth a notice; repeated drops of an unstable server are quiet. */
+  | { state: "reconnecting"; error: DeliveryError; lost: boolean }
   | { state: "token_rejected" };
 
 export type WsStatus = WsState & { requestPending: boolean };

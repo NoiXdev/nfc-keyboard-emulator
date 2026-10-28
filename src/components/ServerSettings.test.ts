@@ -84,7 +84,7 @@ describe("ServerSettings", () => {
     [{ state: "connecting", requestPending: false }, false],
     [{ state: "connected", requestPending: false }, false],
     [{ state: "token_rejected", requestPending: false }, true],
-    [{ state: "reconnecting", error: { kind: "timeout" }, requestPending: false }, true],
+    [{ state: "reconnecting", error: { kind: "timeout" }, lost: false, requestPending: false }, true],
   ] as Array<[WsStatus, boolean]>)("reconnect visibility for %j", async (ws, visible) => {
     const w = render({ ws });
     const btn = w.find('[data-test="ws-reconnect"]');

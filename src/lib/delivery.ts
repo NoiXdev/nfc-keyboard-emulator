@@ -58,12 +58,16 @@ export function serverErrorText(t: Translate, e: ConfigError | ImportError): str
 
 export type WsNotice = { kind: "reconnecting"; error: DeliveryError } | { kind: "token_rejected" };
 
-/** The websocket transitions worth a notification; repeats of the same state are quiet. */
+/**
+ * The websocket transitions worth a notification; repeats of the same state are quiet. A drop
+ * only counts when the backend marks it `lost`, so a server that keeps accepting and closing
+ * the connection is announced once, not on every attempt.
+ */
 export function wsNotice(prev: WsStatus | null, next: WsStatus): WsNotice | null {
   if (next.state === "token_rejected" && prev?.state !== "token_rejected") {
     return { kind: "token_rejected" };
   }
-  if (next.state === "reconnecting" && prev?.state === "connected") {
+  if (next.state === "reconnecting" && next.lost && prev?.state === "connected") {
     return { kind: "reconnecting", error: next.error };
   }
   return null;

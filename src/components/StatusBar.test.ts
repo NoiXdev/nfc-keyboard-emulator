@@ -49,6 +49,7 @@ describe("StatusBar server item", () => {
     const w = render({
       state: "reconnecting",
       error: { kind: "unreachable", message: "refused" },
+      lost: true,
       requestPending: false,
     });
     const text = w.get('[data-test="server"]').text();
