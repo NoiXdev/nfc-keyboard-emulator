@@ -11,6 +11,11 @@ npm install
 TOKEN=dev node server.mjs   # PORT defaults to 8787
 ```
 
+The server listens on `127.0.0.1` only, so it is reachable from this computer but not
+from the network. Set `HOST` (for example `HOST=0.0.0.0`) to listen elsewhere, and put
+it behind TLS if you do: the token is sent in clear text over plain `http://` and
+`ws://`.
+
 Open <http://localhost:8787/> for the demo page, then enter these in the app's
 Server view (use the same token everywhere):
 
@@ -23,6 +28,10 @@ Server view (use the same token everywhere):
 - **HTTP / Stream:** every scan shows up in the page's live list.
 - **Request:** click **Scan** in the page, then hold a card to the reader. The UID
   appears as the result of that request and is not typed.
+
+The page talks to the server over `/browser`. That socket is **demo only and has no
+authentication**: it only checks that the page comes from the server's own address.
+Do not copy it as it is.
 
 `server.mjs` has comments on each protocol rule (token check on the upgrade, the
 `hello` message, `scan`, `scan_request`, `scan_response` and `scan_request_ended`).

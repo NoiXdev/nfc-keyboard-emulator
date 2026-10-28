@@ -1,6 +1,7 @@
 // Example server for nfc-keyboard-emulator's optional server integration.
 // Reference code, not production code: the browser socket has no auth and
-// state lives in memory. Run: TOKEN=dev node server.mjs  (PORT defaults to 8787)
+// state lives in memory. Run: TOKEN=dev node server.mjs
+// PORT defaults to 8787; HOST defaults to 127.0.0.1 (this machine only).
 //
 //   POST /scans   HTTP push target (bearer token required)
 //   WS   /scanner the app's WebSocket (bearer token checked on the upgrade)
@@ -12,6 +13,7 @@ import { readFile } from "node:fs/promises";
 import { WebSocketServer } from "ws";
 
 const PORT = Number(process.env.PORT ?? 8787);
+const HOST = process.env.HOST ?? "127.0.0.1";
 const TOKEN = process.env.TOKEN ?? "";
 if (!TOKEN) {
   console.error("Set TOKEN, e.g. TOKEN=dev node server.mjs");
@@ -22,9 +24,32 @@ if (!TOKEN) {
 // pushes and on the WebSocket upgrade request. Compare in constant time;
 // timingSafeEqual needs equal-length buffers, so lengths are compared first.
 function authorized(req) {
-  const given = Buffer.from((req.headers.authorization ?? "").replace(/^Bearer /i, ""));
+  // Strict scheme: "Bearer", one space, then the token.
+  const match = /^Bearer (.+)$/i.exec(req.headers.authorization ?? "");
+  if (!match) return false;
+  const given = Buffer.from(match[1]);
   const expected = Buffer.from(TOKEN);
   return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
+// Browsers send an Origin header on WebSocket handshakes; only the demo page's
+// own origin may open /browser, so other web pages cannot talk to it.
+const ORIGINS = new Set(
+  [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`, `http://${HOST}:${PORT}`],
+);
+// Non-browser clients send no Origin and are not a cross-site risk.
+const originAllowed = (req) => !req.headers.origin || ORIGINS.has(req.headers.origin);
+
+const pathOf = (req) => new URL(req.url, "http://localhost").pathname; // may throw
+
+// Parses a text frame; anything that is not a JSON object yields null.
+function parse(data) {
+  try {
+    const msg = JSON.parse(data.toString());
+    return msg && typeof msg === "object" ? msg : null;
+  } catch {
+    return null;
+  }
 }
 
 const browsers = new Set(); // sockets on /browser
@@ -44,7 +69,18 @@ function onScan(scan, via) {
 }
 
 const server = createServer(async (req, res) => {
-  const { pathname } = new URL(req.url, "http://localhost");
+  // Never let a handler reject: an unhandled rejection would stop the process.
+  try {
+    await handle(req, res);
+  } catch (err) {
+    console.error("request failed:", err.message);
+    if (!res.headersSent) res.writeHead(500);
+    res.end();
+  }
+});
+
+async function handle(req, res) {
+  const pathname = pathOf(req);
 
   if (req.method === "GET" && pathname === "/") {
     res.setHeader("content-type", "text/html; charset=utf-8");
@@ -55,25 +91,18 @@ const server = createServer(async (req, res) => {
     // 401/403 shows up in the app as "token rejected"; any 2xx is success and
     // the response body is ignored. The app sends `test` (the "Send test"
     // button) and `scan` messages here.
-    if (!authorized(req)) {
-      res.writeHead(401).end();
-      return;
-    }
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    try {
-      const msg = JSON.parse(body);
-      if (msg.type === "scan") onScan(msg, "http");
-      else console.log(`http ${msg.type} from "${msg.device}"`);
-      res.writeHead(204).end();
-    } catch {
-      res.writeHead(400).end();
-    }
-    return;
+    if (!authorized(req)) return res.writeHead(401).end();
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk); // rejects if the client aborts
+    const msg = parse(Buffer.concat(chunks));
+    if (!msg) return res.writeHead(400).end();
+    if (msg.type === "scan") onScan(msg, "http");
+    else console.log(`http ${msg.type} from "${msg.device}"`);
+    return res.writeHead(204).end();
   }
 
   res.writeHead(404).end();
-});
+}
 
 const scanner = new WebSocketServer({ noServer: true });
 const browser = new WebSocketServer({ noServer: true });
@@ -81,7 +110,13 @@ const browser = new WebSocketServer({ noServer: true });
 // Auth happens on the upgrade request, before any WebSocket exists. Answering
 // 401 here makes the app show "token rejected" and stop reconnecting.
 server.on("upgrade", (req, socket, head) => {
-  const { pathname } = new URL(req.url, "http://localhost");
+  socket.on("error", () => socket.destroy());
+  let pathname;
+  try {
+    pathname = pathOf(req);
+  } catch {
+    return socket.destroy();
+  }
   if (pathname === "/scanner") {
     if (!authorized(req)) {
       socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
@@ -89,25 +124,40 @@ server.on("upgrade", (req, socket, head) => {
     }
     scanner.handleUpgrade(req, socket, head, (ws) => onAppConnected(ws));
   } else if (pathname === "/browser") {
+    if (!originAllowed(req)) {
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      return;
+    }
     browser.handleUpgrade(req, socket, head, (ws) => onBrowserConnected(ws));
   } else {
     socket.destroy();
   }
 });
 
+// A malformed frame makes ws emit "error" on the socket; without a listener
+// that would crash the process. Drop the offending client instead.
+function guard(ws, who) {
+  ws.on("error", (err) => {
+    console.error(`${who} socket error: ${err.message}`);
+    ws.terminate();
+  });
+}
+
 function onAppConnected(ws) {
+  guard(ws, "app");
   app?.close(); // a newer connection replaces the old one
   app = ws;
   ws.on("close", () => {
     if (app === ws) app = null;
+    // The app can no longer answer: tell the browsers still waiting.
+    for (const [requestId, owner] of pending) {
+      send(owner, { type: "scan_request_ended", requestId, reason: "app_not_connected" });
+    }
+    pending.clear();
   });
   ws.on("message", (data) => {
-    let msg;
-    try {
-      msg = JSON.parse(data.toString());
-    } catch {
-      return; // ignore anything that is not JSON
-    }
+    const msg = parse(data);
+    if (!msg) return; // ignore anything that is not a JSON object
     switch (msg.type) {
       case "hello": // first message after connecting: who, which version, which modes
         console.log(`app connected: "${msg.device}" v${msg.appVersion}`, msg.modes);
@@ -138,6 +188,7 @@ function forwardToRequester(msg) {
 }
 
 function onBrowserConnected(ws) {
+  guard(ws, "browser");
   browsers.add(ws);
   ws.on("close", () => {
     browsers.delete(ws);
@@ -149,13 +200,7 @@ function onBrowserConnected(ws) {
     }
   });
   ws.on("message", (data) => {
-    let msg;
-    try {
-      msg = JSON.parse(data.toString());
-    } catch {
-      return;
-    }
-    if (msg.type !== "request_scan") return;
+    if (parse(data)?.type !== "request_scan") return;
     if (!app) return send(ws, { type: "scan_request_ended", reason: "app_not_connected" });
     // Ask the app for the next scan. timeoutMs is optional (default 30000,
     // capped at 300000). Only one request is pending in the app at a time: a
@@ -166,4 +211,4 @@ function onBrowserConnected(ws) {
   });
 }
 
-server.listen(PORT, () => console.log(`listening on http://localhost:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`listening on http://${HOST}:${PORT}`));
