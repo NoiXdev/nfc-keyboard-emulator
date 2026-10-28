@@ -92,6 +92,7 @@ pub fn run() {
             let readers = app_state.readers.clone();
             let shared_config = app_state.config.clone();
             let typing_enabled = app_state.typing_enabled.clone();
+            let requests = app_state.requests.clone();
 
             app.manage(app_state);
 
@@ -146,6 +147,7 @@ pub fn run() {
                     typer,
                     config: shared_config,
                     typing_enabled,
+                    requests,
                     ctrl_rx,
                 });
             });

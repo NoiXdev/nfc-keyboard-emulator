@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::integration::requests::RequestSlot;
 use crate::reader::WorkerCommand;
 use crate::scan::ScanRecord;
 use std::collections::VecDeque;
@@ -14,6 +15,7 @@ pub const CONFIG_KEY: &str = "config";
 pub struct AppState {
     pub config: Arc<Mutex<Config>>,
     pub typing_enabled: Arc<AtomicBool>,
+    pub requests: Arc<RequestSlot>,
     pub worker_tx: Mutex<Option<Sender<WorkerCommand>>>,
     pub history: Arc<Mutex<VecDeque<ScanRecord>>>,
     pub readers: Arc<Mutex<Vec<String>>>,
@@ -25,6 +27,7 @@ impl AppState {
         Self {
             config: Arc::new(Mutex::new(config)),
             typing_enabled: Arc::new(AtomicBool::new(typing)),
+            requests: Arc::new(RequestSlot::default()),
             worker_tx: Mutex::new(None),
             history: Arc::new(Mutex::new(VecDeque::new())),
             readers: Arc::new(Mutex::new(Vec::new())),

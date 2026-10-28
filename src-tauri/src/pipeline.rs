@@ -118,6 +118,23 @@ mod tests {
     }
 
     #[test]
+    fn answering_wins_over_typing_disabled() {
+        let mut t = MockTyper::ok();
+        let r = handle_scan(
+            &UID,
+            "R",
+            ts(),
+            &Config::default(),
+            false,
+            Some("abc".into()),
+            &mut t,
+        );
+        assert_eq!(t.call_count(), 0);
+        assert_eq!(r.status, ScanStatus::ServerRequest);
+        assert_eq!(r.request_id, Some("abc".to_string()));
+    }
+
+    #[test]
     fn uid_formatted_is_body_without_suffix() {
         let mut cfg = Config::default();
         cfg.format.prefix = "ID:".into();

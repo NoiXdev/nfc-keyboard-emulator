@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::integration::requests::RequestSlot;
 use crate::pipeline::{handle_scan, read_error_record};
 use crate::reader::{ReaderBackend, ReaderEvent, ReaderStatus, WorkerCommand};
 use crate::scan::ScanRecord;
@@ -33,6 +34,7 @@ pub struct WorkerDeps {
     pub typer: Box<dyn Typer>,
     pub config: Arc<Mutex<Config>>,
     pub typing_enabled: Arc<AtomicBool>,
+    pub requests: Arc<RequestSlot>,
     pub ctrl_rx: Receiver<WorkerCommand>,
 }
 
@@ -54,13 +56,14 @@ pub fn run_worker(mut deps: WorkerDeps) {
                 ReaderEvent::Scan { reader, uid } => {
                     let cfg = deps.config.lock().unwrap().clone();
                     let enabled = deps.typing_enabled.load(Ordering::Relaxed);
+                    let answering = deps.requests.take_for_scan(Instant::now());
                     let rec = handle_scan(
                         &uid,
                         &reader,
                         now_iso(),
                         &cfg,
                         enabled,
-                        None,
+                        answering,
                         deps.typer.as_mut(),
                     );
                     deps.sink.scan(&rec);
@@ -155,6 +158,7 @@ mod tests {
             typer: Box::new(MockTyper::ok()),
             config: Arc::new(Mutex::new(Config::default())),
             typing_enabled,
+            requests: Default::default(),
             ctrl_rx,
         });
 
@@ -181,6 +185,7 @@ mod tests {
             typer: Box::new(MockTyper::ok()),
             config: Arc::new(Mutex::new(Config::default())),
             typing_enabled: Arc::new(AtomicBool::new(false)),
+            requests: Default::default(),
             ctrl_rx,
         });
 
@@ -190,5 +195,79 @@ mod tests {
             per_second < 100.0,
             "worker spun at {per_second:.0} cycles/s - the cycle floor is gone"
         );
+    }
+
+    /// Runs the worker over the queued batches (one `Shutdown` is already waiting,
+    /// so it stops after the first cycle) and returns the records plus the typer.
+    fn run_with_requests(
+        batches: Vec<Vec<ReaderEvent>>,
+        requests: Arc<RequestSlot>,
+    ) -> (Vec<ScanRecord>, MockTyper) {
+        let mut backend = MockReader::new(vec!["R".into()]);
+        for batch in batches {
+            backend.queue(batch);
+        }
+        let sink = TestSink::default();
+        let collected = sink.scans.clone();
+        let typer = MockTyper::ok();
+        let (tx, ctrl_rx) = mpsc::channel();
+        tx.send(WorkerCommand::Shutdown).unwrap();
+
+        run_worker(WorkerDeps {
+            backend: Box::new(backend),
+            sink: Box::new(sink),
+            typer: Box::new(typer.clone()),
+            config: Arc::new(Mutex::new(Config::default())),
+            typing_enabled: Arc::new(AtomicBool::new(true)),
+            requests,
+            ctrl_rx,
+        });
+
+        let scans = collected.lock().unwrap().clone();
+        (scans, typer)
+    }
+
+    fn scan_event(uid: u8) -> ReaderEvent {
+        ReaderEvent::Scan {
+            reader: "R".into(),
+            uid: vec![0x04, uid],
+        }
+    }
+
+    #[test]
+    fn armed_request_is_answered_by_first_scan_only() {
+        let requests = Arc::new(RequestSlot::default());
+        requests.arm("req-1".into(), None, Instant::now());
+
+        let (scans, typer) =
+            run_with_requests(vec![vec![scan_event(1), scan_event(2)]], requests.clone());
+
+        assert_eq!(scans.len(), 2);
+        assert_eq!(scans[0].status, ScanStatus::ServerRequest);
+        assert_eq!(scans[0].request_id, Some("req-1".to_string()));
+        assert_eq!(scans[1].status, ScanStatus::Ok);
+        assert_eq!(scans[1].request_id, None);
+        assert_eq!(typer.call_count(), 1);
+        assert!(!requests.is_armed());
+    }
+
+    #[test]
+    fn read_error_does_not_consume_request() {
+        let requests = Arc::new(RequestSlot::default());
+        requests.arm("req-1".into(), None, Instant::now());
+
+        let (scans, typer) = run_with_requests(
+            vec![vec![
+                ReaderEvent::ReadError { reader: "R".into() },
+                scan_event(1),
+            ]],
+            requests,
+        );
+
+        assert_eq!(scans.len(), 2);
+        assert_eq!(scans[0].status, ScanStatus::ReadError);
+        assert_eq!(scans[1].status, ScanStatus::ServerRequest);
+        assert_eq!(scans[1].request_id, Some("req-1".to_string()));
+        assert_eq!(typer.call_count(), 0);
     }
 }
