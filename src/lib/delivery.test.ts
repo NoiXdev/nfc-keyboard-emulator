@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyDelivery,
   deliveryErrorText,
+  requestNotice,
   serverErrorText,
   withPendingDelivery,
   wsNotice,
@@ -150,5 +151,24 @@ describe("wsNotice", () => {
   it("is quiet for other transitions", () => {
     expect(wsNotice(status("connecting"), status("connected"))).toBeNull();
     expect(wsNotice(status("connected"), status("off"))).toBeNull();
+  });
+});
+
+describe("requestNotice", () => {
+  it("notifies for a new id and remembers it", () => {
+    expect(requestNotice(null, "r1")).toEqual({ notify: true, lastNotified: "r1" });
+  });
+
+  it("stays quiet for the same id twice", () => {
+    const first = requestNotice(null, "r1");
+    expect(requestNotice(first.lastNotified, "r1").notify).toBe(false);
+  });
+
+  it("notifies again for a different id", () => {
+    expect(requestNotice("r1", "r2")).toEqual({ notify: true, lastNotified: "r2" });
+  });
+
+  it("notifies again for the same id once the caller cleared the memory", () => {
+    expect(requestNotice(null, "r1").notify).toBe(true);
   });
 });

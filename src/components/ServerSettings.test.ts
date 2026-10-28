@@ -141,6 +141,39 @@ describe("ServerSettings", () => {
     expect(w.find('[data-test="http-test-result"]').exists()).toBe(false);
   });
 
+  it("ignores a result that arrives after the form was edited", async () => {
+    let finish!: () => void;
+    vi.mocked(api.testHttp).mockReturnValue(new Promise<void>((r) => (finish = r)));
+    const w = render();
+    await w.get('[data-test="http-test"]').trigger("click");
+    expect(w.get('[data-test="http-test"]').attributes("disabled")).toBeDefined();
+    await w.get('[data-test="http-url"]').setValue("https://edited.example");
+    expect(w.get('[data-test="http-test"]').attributes("disabled")).toBeUndefined();
+    finish();
+    await flushPromises();
+    expect(w.find('[data-test="http-test-result"]').exists()).toBe(false);
+    expect(w.get('[data-test="http-test"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("lets a second run supersede the first", async () => {
+    let finishFirst!: () => void;
+    let failSecond!: (e: unknown) => void;
+    vi.mocked(api.testHttp)
+      .mockReturnValueOnce(new Promise<void>((r) => (finishFirst = r)))
+      .mockReturnValueOnce(new Promise<void>((_, rej) => (failSecond = rej)));
+    const w = render();
+    await w.get('[data-test="http-test"]').trigger("click");
+    await w.get('[data-test="http-url"]').setValue("https://second.example");
+    await w.get('[data-test="http-test"]').trigger("click");
+    failSecond({ kind: "timeout" });
+    await flushPromises();
+    finishFirst();
+    await flushPromises();
+    const result = w.get('[data-test="http-test-result"]');
+    expect(result.classes()).toContain("fail");
+    expect(result.text()).toBe(t("delivery.error.timeout"));
+  });
+
   it("asks for confirmation before exporting", async () => {
     const w = render();
     expect(w.find('[data-test="export-warning"]').exists()).toBe(false);

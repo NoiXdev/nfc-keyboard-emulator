@@ -26,6 +26,7 @@ import { pushScan } from "./lib/scanLog";
 import {
   applyDelivery,
   deliveryErrorText,
+  requestNotice,
   serverErrorText,
   withPendingDelivery,
   wsNotice,
@@ -158,7 +159,15 @@ function notifyDelivery(r: DeliveryResult) {
   const error = deliveryErrorText(t, r.error ?? { kind: "unreachable", message: "" });
   notifyServer(t("notify.deliveryFailed"), t("notify.serverBody", { target, error }));
 }
+// Id of the scan request already announced; cleared once no request is pending any more.
+let notifiedRequestId: string | null = null;
+function notifyRequest(requestId: string) {
+  const r = requestNotice(notifiedRequestId, requestId);
+  notifiedRequestId = r.lastNotified;
+  if (r.notify) notifyServer(t("notify.serverRequest"), t("notify.serverWaiting"));
+}
 function notifyWsStatus(prev: WsStatus | null, next: WsStatus) {
+  if (!next.requestPending) notifiedRequestId = null;
   const notice = wsNotice(prev, next);
   if (notice?.kind === "reconnecting") {
     notifyServer(
@@ -198,9 +207,7 @@ onMounted(async () => {
       ws.value = s;
     }),
   );
-  unlisten.push(
-    await onWsRequest(() => notifyServer(t("notify.serverRequest"), t("notify.serverWaiting"))),
-  );
+  unlisten.push(await onWsRequest(notifyRequest));
   // The same preview can arrive twice (replay after subscribing and the live event).
   unlisten.push(await onImportPreview((p) => (pendingImport.value = p)));
   unlisten.push(await onImportError((e) => (importError.value = e)));

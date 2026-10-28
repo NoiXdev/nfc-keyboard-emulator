@@ -48,28 +48,30 @@ type TestResult = null | "running" | "ok" | DeliveryError;
 const httpTest = ref<TestResult>(null);
 const wsTest = ref<TestResult>(null);
 
-watch(
-  () => local.http,
-  () => (httpTest.value = null),
-  { deep: true },
-);
-watch(
-  () => local.ws,
-  () => (wsTest.value = null),
-  { deep: true },
-);
+// Each target counts its runs: a result counts only while its run is still current, so
+// editing the form (or starting another test) drops whatever is still in flight.
+const runs = { http: 0, ws: 0 };
 
-async function runTest(result: typeof httpTest, run: () => Promise<void>) {
+function invalidate(target: keyof typeof runs, result: typeof httpTest) {
+  runs[target]++;
+  result.value = null;
+}
+watch(() => local.http, () => invalidate("http", httpTest), { deep: true });
+watch(() => local.ws, () => invalidate("ws", wsTest), { deep: true });
+
+async function runTest(target: keyof typeof runs, result: typeof httpTest, run: () => Promise<void>) {
+  const mine = ++runs[target];
   result.value = "running";
+  let outcome: TestResult = "ok";
   try {
     await run();
-    result.value = "ok";
   } catch (e) {
-    result.value = e as DeliveryError;
+    outcome = e as DeliveryError;
   }
+  if (mine === runs[target]) result.value = outcome;
 }
-const testHttp = () => runTest(httpTest, () => api.testHttp({ ...local.http }, local.deviceName));
-const testWs = () => runTest(wsTest, () => api.testWs({ ...local.ws }, local.deviceName));
+const testHttp = () => runTest("http", httpTest, () => api.testHttp({ ...local.http }, local.deviceName));
+const testWs = () => runTest("ws", wsTest, () => api.testWs({ ...local.ws }, local.deviceName));
 
 function testText(r: TestResult): string {
   if (r === "ok") return t("server.testOk");

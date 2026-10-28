@@ -68,3 +68,14 @@ export function wsNotice(prev: WsStatus | null, next: WsStatus): WsNotice | null
   }
   return null;
 }
+
+/**
+ * Whether a scan request deserves a notice. The backend announces every scan_request, also
+ * a repeated id, so the id last notified is remembered until the request is no longer pending.
+ */
+export function requestNotice(
+  lastNotified: string | null,
+  requestId: string,
+): { notify: boolean; lastNotified: string } {
+  return { notify: requestId !== lastNotified, lastNotified: requestId };
+}
