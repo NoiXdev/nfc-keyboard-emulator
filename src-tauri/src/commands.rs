@@ -196,7 +196,23 @@ pub fn stage_import(
     let current = state.config.lock().unwrap().integration.clone();
     let preview = config_file::preview(&current, &file, source);
     *state.pending_import.lock().unwrap() = Some((preview.id.clone(), file, source));
+    *state.pending_import_error.lock().unwrap() = None;
     preview
+}
+
+/// Keeps a link's error so a frontend that was not listening yet can still show it.
+pub fn record_link_error(state: &AppState, error: ImportError) {
+    *state.pending_import_error.lock().unwrap() = Some(error);
+}
+
+fn take_import_error(state: &AppState) -> Option<ImportError> {
+    state.pending_import_error.lock().unwrap().take()
+}
+
+/// The error of the last config link, if no import has replaced it. Taking clears it.
+#[tauri::command]
+pub fn take_pending_import_error(state: State<AppState>) -> Option<ImportError> {
+    take_import_error(&state)
 }
 
 /// Takes the pending import if `id` matches it; a wrong id leaves it in place.
@@ -315,5 +331,23 @@ mod tests {
         assert_eq!(take_pending(&state, "id-1"), Some(file));
         assert!(state.pending_import.lock().unwrap().is_none());
         assert_eq!(take_pending(&state, "id-1"), None);
+    }
+
+    #[test]
+    fn link_error_is_kept_until_taken_or_replaced_by_an_import() {
+        let state = AppState::new(Config::default());
+        assert_eq!(take_import_error(&state), None);
+
+        record_link_error(&state, ImportError::InvalidLink);
+        record_link_error(&state, ImportError::WrongFormat);
+        assert_eq!(take_import_error(&state), Some(ImportError::WrongFormat));
+        assert_eq!(take_import_error(&state), None);
+
+        record_link_error(&state, ImportError::InvalidLink);
+        let file =
+            parse_config_file(r#"{"format":"nfc-keyboard-emulator/server-config","version":1}"#)
+                .unwrap();
+        stage_import(&state, file, ImportSource::File);
+        assert_eq!(take_import_error(&state), None);
     }
 }

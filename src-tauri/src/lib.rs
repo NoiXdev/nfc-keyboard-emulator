@@ -105,6 +105,7 @@ fn handle_config_link(app: &AppHandle, url: &str) {
             let _ = app.emit("import-preview", preview);
         }
         Err(e) => {
+            commands::record_link_error(&app.state::<AppState>(), e.clone());
             let _ = app.emit("import-error", e);
         }
     }
@@ -261,6 +262,7 @@ pub fn run() {
             commands::export_server_config,
             commands::import_server_config,
             commands::get_pending_import,
+            commands::take_pending_import_error,
             commands::apply_import,
             commands::discard_import,
         ])

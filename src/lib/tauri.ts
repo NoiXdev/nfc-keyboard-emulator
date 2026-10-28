@@ -145,6 +145,7 @@ export const api = {
   exportServerConfig: () => invoke<boolean>("export_server_config"),
   importServerConfig: () => invoke<ImportPreview | null>("import_server_config"),
   getPendingImport: () => invoke<ImportPreview | null>("get_pending_import"),
+  takePendingImportError: () => invoke<ImportError | null>("take_pending_import_error"),
   applyImport: (id: string) => invoke<Config>("apply_import", { id }),
   discardImport: (id: string) => invoke<void>("discard_import", { id }),
 };
@@ -161,13 +162,19 @@ export const onWsStatus = (cb: (s: WsStatus) => void): Promise<UnlistenFn> =>
   listen<WsStatus>("ws-status", (e) => cb(e.payload));
 export const onWsRequest = (cb: (requestId: string) => void): Promise<UnlistenFn> =>
   listen<{ requestId: string }>("ws-request", (e) => cb(e.payload.requestId));
-// A link that started the app arrives before anyone listens, so the pending import is
-// fetched once after subscribing as well.
-export const onImportPreview = async (cb: (p: ImportPreview) => void): Promise<UnlistenFn> => {
-  const unlisten = await listen<ImportPreview>("import-preview", (e) => cb(e.payload));
-  const pending = await api.getPendingImport();
-  if (pending) cb(pending);
+// A link that started the app arrives before anyone listens, so what it left behind is
+// fetched once after subscribing as well. A failed fetch only skips that replay.
+const listenWithReplay = async <T>(
+  event: string,
+  pending: () => Promise<T | null>,
+  cb: (payload: T) => void,
+): Promise<UnlistenFn> => {
+  const unlisten = await listen<T>(event, (e) => cb(e.payload));
+  const missed = await pending().catch(() => null);
+  if (missed) cb(missed);
   return unlisten;
 };
+export const onImportPreview = (cb: (p: ImportPreview) => void): Promise<UnlistenFn> =>
+  listenWithReplay("import-preview", api.getPendingImport, cb);
 export const onImportError = (cb: (e: ImportError) => void): Promise<UnlistenFn> =>
-  listen<ImportError>("import-error", (e) => cb(e.payload));
+  listenWithReplay("import-error", api.takePendingImportError, cb);

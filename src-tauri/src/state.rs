@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::integration::config_file::{ImportSource, ServerConfigFile};
+use crate::integration::config_file::{ImportError, ImportSource, ServerConfigFile};
 use crate::integration::requests::RequestSlot;
 use crate::reader::WorkerCommand;
 use crate::scan::ScanRecord;
@@ -23,6 +23,9 @@ pub struct AppState {
     /// The import waiting for the user's confirmation, keyed by its preview id. A new
     /// import replaces it.
     pub pending_import: Mutex<Option<(String, ServerConfigFile, ImportSource)>>,
+    /// The last link that failed to decode, kept until the frontend takes it or a later
+    /// import stages successfully.
+    pub pending_import_error: Mutex<Option<ImportError>>,
 }
 
 impl AppState {
@@ -36,6 +39,7 @@ impl AppState {
             history: Arc::new(Mutex::new(VecDeque::new())),
             readers: Arc::new(Mutex::new(Vec::new())),
             pending_import: Mutex::new(None),
+            pending_import_error: Mutex::new(None),
         }
     }
 }
