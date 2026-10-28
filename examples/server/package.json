@@ -1,0 +1,16 @@
+{
+  "name": "nfc-keyboard-emulator-example-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal example server for nfc-keyboard-emulator server integration",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}

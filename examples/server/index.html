@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NFC scan demo</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    button { font: inherit; padding: .5rem 1.25rem; }
+    code { font-family: ui-monospace, monospace; }
+    #conn { opacity: .7; }
+    li { margin: .25rem 0; }
+  </style>
+</head>
+<body>
+  <h1>NFC scan demo</h1>
+  <p id="conn">Connecting…</p>
+
+  <h2>Request a scan</h2>
+  <p><button id="scan" disabled>Scan</button> <span id="result">No request yet.</span></p>
+
+  <h2>Incoming scans</h2>
+  <ul id="scans"></ul>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const ws = new WebSocket(`ws://${location.host}/browser`);
+
+    ws.onopen = () => { $("conn").textContent = "Connected to the server."; $("scan").disabled = false; };
+    ws.onclose = () => { $("conn").textContent = "Disconnected. Reload to retry."; $("scan").disabled = true; };
+
+    $("scan").onclick = () => {
+      ws.send(JSON.stringify({ type: "request_scan" }));
+      $("result").textContent = "Waiting for a card…";
+    };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "scan") {
+        const li = document.createElement("li");
+        li.innerHTML = "<code></code> <small></small>";
+        li.querySelector("code").textContent = msg.uidFormatted;
+        li.querySelector("small").textContent = `${msg.device}, via ${msg.via}, ${msg.timestamp}`;
+        $("scans").prepend(li);
+      } else if (msg.type === "scan_response") {
+        $("result").textContent = `Result: ${msg.uidFormatted} (${msg.device})`;
+      } else if (msg.type === "scan_request_ended") {
+        $("result").textContent = `No scan: ${msg.reason}`;
+      }
+    };
+  </script>
+</body>
+</html>

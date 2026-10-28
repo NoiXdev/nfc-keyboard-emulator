@@ -33,7 +33,10 @@ Please include, where possible:
 ## Scope
 
 The app synthesizes keystrokes (macOS Accessibility API / Windows `SendInput`)
-and reads card UIDs over the PC/SC smartcard API. It has no network access and
-stores only a local settings file; card UIDs never leave the machine. Reports
+and reads card UIDs over the PC/SC smartcard API. Card UIDs stay on the machine by
+default; they are sent only to servers the user enters, and only for the modes the
+user switches on. At startup the app asks GitHub whether a newer version exists, and
+no scan data is sent with that request. The app stores a local settings file, which
+includes any server tokens the user enters. Reports
 concerning the keystroke-injection path, the reader/worker boundary, or the
 release/signing pipeline are especially welcome.

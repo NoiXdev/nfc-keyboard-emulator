@@ -22,8 +22,8 @@
 **nfc-keyboard-emulator** is a small cross-platform desktop app that bridges a PC/SC
 NFC/contactless reader to your keyboard. Place a card on the reader and the app reads
 its UID and types it straight into whatever input field is focused — a software
-"keyboard wedge" for readers that don't emulate a keyboard themselves. Everything runs
-locally: no cloud, no telemetry, no account.
+"keyboard wedge" for readers that don't emulate a keyboard themselves. Scan data stays
+on your computer by default: no cloud, no telemetry, no account.
 
 ## Why
 
@@ -43,7 +43,11 @@ every scanned card UID is entered for you — exactly as if you had typed it.
 - **Tray + autostart** — closes to the system tray; optional launch on login.
 - **Single instance** — a second launch just brings the running app back into focus,
   so a card is never read (and typed) twice.
-- **Local only** — no network access; the card UID never leaves your machine.
+- **Your server, optionally** — send scans to your own server, or let a web app request a
+  scan. Off by default; see the [server integration guide](https://docs.noix.dev/nfc-keyboard-emulator/guide/server-integration/).
+- **Private by default** — scan data is sent only to servers you enter, and only for the
+  modes you switch on. At startup the app asks GitHub whether a newer version exists; no
+  scan data is sent with that request.
 
 ## Supported hardware
 
