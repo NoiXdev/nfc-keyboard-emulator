@@ -68,7 +68,7 @@ pub async fn test_http(
 }
 
 /// `scheme://host[:port]` only: path and query may carry secrets and are never reported.
-fn origin_of(url: &Url) -> String {
+pub(super) fn origin_of(url: &Url) -> String {
     let host = url.host_str().unwrap_or_default();
     match url.port() {
         Some(port) => format!("{}://{host}:{port}", url.scheme()),
