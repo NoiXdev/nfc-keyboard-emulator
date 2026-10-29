@@ -36,8 +36,123 @@
         },
         "token": {
           "type": "string",
-          "description": "Sent as Authorization: Bearer <token>. Only visible ASCII characters (no spaces, control characters or non-ASCII), since the token goes into an HTTP header. The app trims surrounding whitespace before validating. An absent key leaves the token unchanged; an empty string clears it.",
+          "description": "Sent according to auth; by default as Authorization: Bearer <token>. Only visible ASCII characters (no spaces, control characters or non-ASCII), since the token can go into an HTTP header. The app trims surrounding whitespace before validating. An absent key leaves the token unchanged; an empty string clears it.",
           "pattern": "^[!-~]*$"
+        },
+        "auth": {
+          "type": "object",
+          "description": "How the token is sent to the HTTP endpoint. Only the field of the active mode is checked; the others are kept so switching modes loses nothing. An absent key keeps the current setting; a present object replaces it, and its missing keys take their defaults. Older app versions ignore it.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "bearer",
+                "header",
+                "basic",
+                "query",
+                "none"
+              ],
+              "default": "bearer",
+              "description": "bearer sends Authorization: Bearer <token>. header sends the token as the value of the header named by headerName. basic sends Authorization: Basic with username and token as the password. query appends the token to the URL as the query parameter named by queryParam. none sends no credential."
+            },
+            "headerName": {
+              "type": "string",
+              "default": "X-API-Key",
+              "description": "Header that carries the token in header mode. An RFC 7230 token (letters, digits and !#$%&'*+-.^_`|~) that is not Host, Content-Length, Content-Type, Connection, Upgrade, Transfer-Encoding or Sec-WebSocket-*. The app trims surrounding whitespace before validating."
+            },
+            "username": {
+              "type": "string",
+              "default": "",
+              "description": "User name in basic mode. May be empty. Visible ASCII without a colon. The app trims surrounding whitespace before validating."
+            },
+            "queryParam": {
+              "type": "string",
+              "default": "token",
+              "description": "Query parameter that carries the token in query mode. Letters, digits and . _ ~ - only, not empty. The app trims surrounding whitespace before validating."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "header"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "headerName": {
+                    "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$",
+                    "not": {
+                      "pattern": "^([Hh][Oo][Ss][Tt]|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Tt][Yy][Pp][Ee]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Uu][Pp][Gg][Rr][Aa][Dd][Ee]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]-[Ee][Nn][Cc][Oo][Dd][Ii][Nn][Gg])$|^[Ss][Ee][Cc]-[Ww][Ee][Bb][Ss][Oo][Cc][Kk][Ee][Tt]-"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "basic"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "username": {
+                    "pattern": "^[!-9;-~]*$"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "query"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "queryParam": {
+                    "pattern": "^[A-Za-z0-9._~-]+$"
+                  }
+                }
+              }
+            }
+          ],
+          "additionalProperties": true
+        },
+        "payload": {
+          "type": "object",
+          "description": "What a scan looks like when sent to the HTTP endpoint with every POST. An absent key keeps the current setting; a present object replaces it, and its missing keys take their defaults. Older app versions ignore it.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "standard",
+                "template"
+              ],
+              "default": "standard",
+              "description": "standard sends the app's own JSON. template sends the JSON in template instead."
+            },
+            "template": {
+              "type": "string",
+              "default": "",
+              "description": "JSON text, at most 8192 bytes in UTF-8, used in template mode and kept otherwise. Placeholders of the form {{name}} are replaced inside string values (never keys): uid, uidFormatted, uidLength, scanId, device, reader and timestamp. A string that is exactly {{uidLength}} becomes a number. Not trimmed. The app rejects a template that is not valid JSON, is too large or names an unknown placeholder."
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true
@@ -53,8 +168,123 @@
         },
         "token": {
           "type": "string",
-          "description": "Sent as Authorization: Bearer <token> on the upgrade request. Only visible ASCII characters (no spaces, control characters or non-ASCII), since the token goes into an HTTP header. The app trims surrounding whitespace before validating. An absent key leaves the token unchanged; an empty string clears it.",
+          "description": "Sent according to auth on the upgrade request; by default as Authorization: Bearer <token>. Only visible ASCII characters (no spaces, control characters or non-ASCII), since the token can go into an HTTP header. The app trims surrounding whitespace before validating. An absent key leaves the token unchanged; an empty string clears it.",
           "pattern": "^[!-~]*$"
+        },
+        "auth": {
+          "type": "object",
+          "description": "How the token is sent to the WebSocket server. Only the field of the active mode is checked; the others are kept so switching modes loses nothing. An absent key keeps the current setting; a present object replaces it, and its missing keys take their defaults. Older app versions ignore it.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "bearer",
+                "header",
+                "basic",
+                "query",
+                "none"
+              ],
+              "default": "bearer",
+              "description": "bearer sends Authorization: Bearer <token>. header sends the token as the value of the header named by headerName. basic sends Authorization: Basic with username and token as the password. query appends the token to the URL as the query parameter named by queryParam. none sends no credential."
+            },
+            "headerName": {
+              "type": "string",
+              "default": "X-API-Key",
+              "description": "Header that carries the token in header mode. An RFC 7230 token (letters, digits and !#$%&'*+-.^_`|~) that is not Host, Content-Length, Content-Type, Connection, Upgrade, Transfer-Encoding or Sec-WebSocket-*. The app trims surrounding whitespace before validating."
+            },
+            "username": {
+              "type": "string",
+              "default": "",
+              "description": "User name in basic mode. May be empty. Visible ASCII without a colon. The app trims surrounding whitespace before validating."
+            },
+            "queryParam": {
+              "type": "string",
+              "default": "token",
+              "description": "Query parameter that carries the token in query mode. Letters, digits and . _ ~ - only, not empty. The app trims surrounding whitespace before validating."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "header"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "headerName": {
+                    "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$",
+                    "not": {
+                      "pattern": "^([Hh][Oo][Ss][Tt]|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Ll][Ee][Nn][Gg][Tt][Hh]|[Cc][Oo][Nn][Tt][Ee][Nn][Tt]-[Tt][Yy][Pp][Ee]|[Cc][Oo][Nn][Nn][Ee][Cc][Tt][Ii][Oo][Nn]|[Uu][Pp][Gg][Rr][Aa][Dd][Ee]|[Tt][Rr][Aa][Nn][Ss][Ff][Ee][Rr]-[Ee][Nn][Cc][Oo][Dd][Ii][Nn][Gg])$|^[Ss][Ee][Cc]-[Ww][Ee][Bb][Ss][Oo][Cc][Kk][Ee][Tt]-"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "basic"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "username": {
+                    "pattern": "^[!-9;-~]*$"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "query"
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "queryParam": {
+                    "pattern": "^[A-Za-z0-9._~-]+$"
+                  }
+                }
+              }
+            }
+          ],
+          "additionalProperties": true
+        },
+        "payload": {
+          "type": "object",
+          "description": "What a scan looks like when sent to the WebSocket server as stream scan messages (hello, scan responses and incoming messages stay standard). An absent key keeps the current setting; a present object replaces it, and its missing keys take their defaults. Older app versions ignore it.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "standard",
+                "template"
+              ],
+              "default": "standard",
+              "description": "standard sends the app's own JSON. template sends the JSON in template instead."
+            },
+            "template": {
+              "type": "string",
+              "default": "",
+              "description": "JSON text, at most 8192 bytes in UTF-8, used in template mode and kept otherwise. Placeholders of the form {{name}} are replaced inside string values (never keys): uid, uidFormatted, uidLength, scanId, device, reader and timestamp. A string that is exactly {{uidLength}} becomes a number. Not trimmed. The app rejects a template that is not valid JSON, is too large or names an unknown placeholder."
+            }
+          },
+          "additionalProperties": true
         },
         "stream": {
           "type": "boolean",

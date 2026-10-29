@@ -4,9 +4,10 @@ use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::config::{valid_token, valid_url, IntegrationConfig};
+use super::auth::{validate_auth, AuthConfig, AuthError, AuthMode};
+use super::config::{normalize_target_auth, valid_token, valid_url, IntegrationConfig};
 use super::http::origin_of;
-use super::template::TemplateError;
+use super::template::{validate_payload, PayloadConfig, PayloadMode, TemplateError};
 
 pub const FORMAT_ID: &str = "nfc-keyboard-emulator/server-config";
 pub const FORMAT_VERSION: u32 = 1;
@@ -18,7 +19,8 @@ const LINK_ACTION: &str = "configure";
 const LINK_PARAM: &str = "config";
 
 /// The import/export file. Every key except `format` and `version` is optional: an absent
-/// key leaves the setting unchanged, a present one (even `""`) replaces it.
+/// key leaves the setting unchanged, a present one (even `""`) replaces it. A present `auth`
+/// or `payload` object replaces the whole setting; its missing keys take their defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfigFile {
@@ -43,6 +45,10 @@ pub struct HttpPatch {
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<PayloadConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +62,10 @@ pub struct WsPatch {
     pub stream: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<PayloadConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -125,10 +135,16 @@ pub fn parse_config_file(text: &str) -> Result<ServerConfigFile, ImportError> {
         for s in [&mut http.url, &mut http.token].into_iter().flatten() {
             trim_in_place(s);
         }
+        if let Some(auth) = &mut http.auth {
+            normalize_target_auth(auth);
+        }
     }
     if let Some(ws) = &mut file.ws {
         for s in [&mut ws.url, &mut ws.token].into_iter().flatten() {
             trim_in_place(s);
+        }
+        if let Some(auth) = &mut ws.auth {
+            normalize_target_auth(auth);
         }
     }
 
@@ -147,6 +163,26 @@ pub fn parse_config_file(text: &str) -> Result<ServerConfigFile, ImportError> {
     let ws_token = file.ws.as_ref().and_then(|w| w.token.as_deref());
     if !valid_token(ws_token.unwrap_or("")) {
         return Err(ImportError::InvalidWsToken);
+    }
+    if let Some(auth) = file.http.as_ref().and_then(|h| h.auth.as_ref()) {
+        validate_auth(auth).map_err(|e| match e {
+            AuthError::HeaderName => ImportError::InvalidHttpHeaderName,
+            AuthError::Username => ImportError::InvalidHttpUsername,
+            AuthError::QueryParam => ImportError::InvalidHttpQueryParam,
+        })?;
+    }
+    if let Some(auth) = file.ws.as_ref().and_then(|w| w.auth.as_ref()) {
+        validate_auth(auth).map_err(|e| match e {
+            AuthError::HeaderName => ImportError::InvalidWsHeaderName,
+            AuthError::Username => ImportError::InvalidWsUsername,
+            AuthError::QueryParam => ImportError::InvalidWsQueryParam,
+        })?;
+    }
+    if let Some(payload) = file.http.as_ref().and_then(|h| h.payload.as_ref()) {
+        validate_payload(payload).map_err(|error| ImportError::InvalidHttpTemplate { error })?;
+    }
+    if let Some(payload) = file.ws.as_ref().and_then(|w| w.payload.as_ref()) {
+        validate_payload(payload).map_err(|error| ImportError::InvalidWsTemplate { error })?;
     }
     Ok(file)
 }
@@ -171,6 +207,12 @@ pub fn apply(cfg: &IntegrationConfig, f: &ServerConfigFile) -> IntegrationConfig
         if let Some(v) = &http.token {
             out.http.token = v.clone();
         }
+        if let Some(v) = &http.auth {
+            out.http.auth = v.clone();
+        }
+        if let Some(v) = &http.payload {
+            out.http.payload = v.clone();
+        }
     }
     if let Some(ws) = &f.ws {
         if let Some(v) = &ws.url {
@@ -178,6 +220,12 @@ pub fn apply(cfg: &IntegrationConfig, f: &ServerConfigFile) -> IntegrationConfig
         }
         if let Some(v) = &ws.token {
             out.ws.token = v.clone();
+        }
+        if let Some(v) = &ws.auth {
+            out.ws.auth = v.clone();
+        }
+        if let Some(v) = &ws.payload {
+            out.ws.payload = v.clone();
         }
         if let Some(v) = ws.stream {
             out.ws.stream = v;
@@ -189,7 +237,13 @@ pub fn apply(cfg: &IntegrationConfig, f: &ServerConfigFile) -> IntegrationConfig
     out
 }
 
-/// The current settings as a config file, tokens included.
+/// `Some` only for a non-default value, so a plain config exports without the new keys.
+fn unless_default<T: Default + PartialEq + Clone>(v: &T) -> Option<T> {
+    (*v != T::default()).then(|| v.clone())
+}
+
+/// The current settings as a config file, tokens included. Auth and payload are written only
+/// when they differ from the defaults.
 pub fn export(cfg: &IntegrationConfig) -> ServerConfigFile {
     ServerConfigFile {
         schema: Some(SCHEMA_URL.to_string()),
@@ -200,12 +254,16 @@ pub fn export(cfg: &IntegrationConfig) -> ServerConfigFile {
             enabled: Some(cfg.http.enabled),
             url: Some(cfg.http.url.clone()),
             token: Some(cfg.http.token.clone()),
+            auth: unless_default(&cfg.http.auth),
+            payload: unless_default(&cfg.http.payload),
         }),
         ws: Some(WsPatch {
             url: Some(cfg.ws.url.clone()),
             token: Some(cfg.ws.token.clone()),
             stream: Some(cfg.ws.stream),
             request: Some(cfg.ws.request),
+            auth: unless_default(&cfg.ws.auth),
+            payload: unless_default(&cfg.ws.payload),
         }),
     }
 }
@@ -291,6 +349,12 @@ pub struct ImportPreview {
     pub http_token_to_new_host: bool,
     /// `https` becomes `http`.
     pub http_downgrade: bool,
+    pub http_auth: AuthMode,
+    /// The whole HTTP auth setting differs from the current one.
+    pub http_auth_changed: bool,
+    pub http_payload: PayloadMode,
+    /// The whole HTTP payload setting differs from the current one.
+    pub http_payload_changed: bool,
     pub ws_host_before: Option<String>,
     pub ws_host_after: Option<String>,
     pub ws_stream: bool,
@@ -300,6 +364,12 @@ pub struct ImportPreview {
     pub ws_token_to_new_host: bool,
     /// `wss` becomes `ws`.
     pub ws_downgrade: bool,
+    pub ws_auth: AuthMode,
+    /// The whole WebSocket auth setting differs from the current one.
+    pub ws_auth_changed: bool,
+    pub ws_payload: PayloadMode,
+    /// The whole WebSocket payload setting differs from the current one.
+    pub ws_payload_changed: bool,
 }
 
 pub fn preview(
@@ -313,11 +383,13 @@ pub fn preview(
     let http = HostChange::new(
         (&current.http.url, &current.http.token),
         (&after.http.url, &after.http.token),
+        (current.http.auth.mode, after.http.auth.mode),
         "https",
     );
     let ws = HostChange::new(
         (&current.ws.url, &current.ws.token),
         (&after.ws.url, &after.ws.token),
+        (current.ws.auth.mode, after.ws.auth.mode),
         "wss",
     );
     ImportPreview {
@@ -330,6 +402,10 @@ pub fn preview(
         http_token: token_change(&current.http.token, http_token),
         http_token_to_new_host: http.token_to_new_host,
         http_downgrade: http.downgrade,
+        http_auth: after.http.auth.mode,
+        http_auth_changed: after.http.auth != current.http.auth,
+        http_payload: after.http.payload.mode,
+        http_payload_changed: after.http.payload != current.http.payload,
         ws_host_before: ws.before,
         ws_host_after: ws.after,
         ws_stream: after.ws.stream,
@@ -337,6 +413,10 @@ pub fn preview(
         ws_token: token_change(&current.ws.token, ws_token),
         ws_token_to_new_host: ws.token_to_new_host,
         ws_downgrade: ws.downgrade,
+        ws_auth: after.ws.auth.mode,
+        ws_auth_changed: after.ws.auth != current.ws.auth,
+        ws_payload: after.ws.payload.mode,
+        ws_payload_changed: after.ws.payload != current.ws.payload,
     }
 }
 
@@ -349,15 +429,25 @@ struct HostChange {
 }
 
 impl HostChange {
-    /// `before` and `after` are `(url, token)`; `secure` is the scheme that encrypts.
-    fn new(before: (&str, &str), after: (&str, &str), secure: &str) -> Self {
+    /// `before` and `after` are `(url, token)`; `modes` are the auth modes before and after;
+    /// `secure` is the scheme that encrypts. A kept token that moves into the URL query also
+    /// counts as going somewhere new: URLs end up in logs and histories.
+    fn new(
+        before: (&str, &str),
+        after: (&str, &str),
+        modes: (AuthMode, AuthMode),
+        secure: &str,
+    ) -> Self {
         let old = Url::parse(before.0).ok().filter(Url::has_host);
         let new = Url::parse(after.0).ok().filter(Url::has_host);
         let old_origin = old.as_ref().map(origin_of);
         let new_origin = new.as_ref().map(origin_of);
         let token_kept = !before.1.is_empty() && after.1 == before.1;
         Self {
-            token_to_new_host: token_kept && new_origin.is_some() && new_origin != old_origin,
+            token_to_new_host: token_kept
+                && new_origin.is_some()
+                && (new_origin != old_origin
+                    || (modes.0 != AuthMode::Query && modes.1 == AuthMode::Query)),
             downgrade: old.is_some_and(|u| u.scheme() == secure)
                 && new.is_some_and(|u| u.scheme() != secure),
             before: old_origin,
@@ -402,6 +492,231 @@ mod tests {
 
     fn json(f: &ServerConfigFile) -> String {
         serde_json::to_string(f).unwrap()
+    }
+
+    /// `sample()` with non-default auth and payload on both targets.
+    fn custom() -> IntegrationConfig {
+        let mut cfg = sample();
+        cfg.http.auth = AuthConfig {
+            mode: AuthMode::Basic,
+            username: "reader".into(),
+            ..Default::default()
+        };
+        cfg.http.payload = PayloadConfig {
+            mode: PayloadMode::Template,
+            template: r#"{"tag":"{{uid}}"}"#.into(),
+        };
+        cfg.ws.auth = AuthConfig {
+            mode: AuthMode::Header,
+            header_name: "X-Station-Key".into(),
+            ..Default::default()
+        };
+        cfg.ws.payload = PayloadConfig {
+            mode: PayloadMode::Template,
+            template: r#"{"n":"{{uidLength}}"}"#.into(),
+        };
+        cfg
+    }
+
+    fn parse_body(body: &str) -> Result<ServerConfigFile, ImportError> {
+        parse_config_file(&format!(
+            r#"{{"format":"nfc-keyboard-emulator/server-config","version":1,{body}}}"#
+        ))
+    }
+
+    #[test]
+    fn old_file_without_auth_imports_unchanged() {
+        let cfg = custom();
+        let f =
+            parse_body(r#""http":{"url":"https://new.example.com/hook"},"ws":{"stream":false}"#)
+                .unwrap();
+        assert_eq!(f.http.as_ref().unwrap().auth, None);
+        assert_eq!(f.http.as_ref().unwrap().payload, None);
+        assert_eq!(f.ws.as_ref().unwrap().auth, None);
+        assert_eq!(f.ws.as_ref().unwrap().payload, None);
+        let out = apply(&cfg, &f);
+        assert_eq!(out.http.auth, cfg.http.auth);
+        assert_eq!(out.http.payload, cfg.http.payload);
+        assert_eq!(out.ws.auth, cfg.ws.auth);
+        assert_eq!(out.ws.payload, cfg.ws.payload);
+    }
+
+    #[test]
+    fn auth_object_replaces_whole_setting() {
+        let mut cfg = custom();
+        cfg.http.auth.header_name = "X-Old".into();
+        cfg.http.auth.query_param = "old".into();
+        cfg.ws.payload.template = r#"{"old":true}"#.into();
+        let f = parse_body(
+            r#""http":{"auth":{"mode":"query"},"payload":{"mode":"standard"}},
+               "ws":{"auth":{"mode":"none"},"payload":{"template":"{}"}}"#,
+        )
+        .unwrap();
+        let out = apply(&cfg, &f);
+        // Missing sub-fields take their defaults instead of keeping the current values.
+        assert_eq!(
+            out.http.auth,
+            AuthConfig {
+                mode: AuthMode::Query,
+                ..Default::default()
+            }
+        );
+        assert_eq!(out.http.payload, PayloadConfig::default());
+        assert_eq!(
+            out.ws.auth,
+            AuthConfig {
+                mode: AuthMode::None,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            out.ws.payload,
+            PayloadConfig {
+                mode: PayloadMode::Standard,
+                template: "{}".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn import_trims_auth_names_but_not_templates() {
+        let f = parse_body(
+            r#""http":{"auth":{"mode":"header","headerName":" X-Key\n","username":" u ","queryParam":" q "},
+                       "payload":{"mode":"template","template":" {\"a\":1}\n"}}"#,
+        )
+        .unwrap();
+        let http = f.http.unwrap();
+        let auth = http.auth.unwrap();
+        assert_eq!(auth.header_name, "X-Key");
+        assert_eq!(auth.username, "u");
+        assert_eq!(auth.query_param, "q");
+        assert_eq!(http.payload.unwrap().template, " {\"a\":1}\n");
+    }
+
+    #[test]
+    fn import_rejects_bad_header_name() {
+        let err =
+            parse_body(r#""http":{"auth":{"mode":"header","headerName":"bad name"}}"#).unwrap_err();
+        assert_eq!(err, ImportError::InvalidHttpHeaderName);
+        assert!(!serde_json::to_string(&err).unwrap().contains("bad name"));
+        assert_eq!(
+            parse_body(r#""ws":{"auth":{"mode":"header","headerName":"Host"}}"#),
+            Err(ImportError::InvalidWsHeaderName)
+        );
+        assert_eq!(
+            parse_body(r#""http":{"auth":{"mode":"header","headerName":""}}"#),
+            Err(ImportError::InvalidHttpHeaderName)
+        );
+        assert_eq!(
+            parse_body(r#""http":{"auth":{"mode":"basic","username":"a:b"}}"#),
+            Err(ImportError::InvalidHttpUsername)
+        );
+        assert_eq!(
+            parse_body(r#""ws":{"auth":{"mode":"basic","username":"a b"}}"#),
+            Err(ImportError::InvalidWsUsername)
+        );
+        assert_eq!(
+            parse_body(r#""http":{"auth":{"mode":"query","queryParam":"a b"}}"#),
+            Err(ImportError::InvalidHttpQueryParam)
+        );
+        assert_eq!(
+            parse_body(r#""ws":{"auth":{"mode":"query","queryParam":""}}"#),
+            Err(ImportError::InvalidWsQueryParam)
+        );
+        // Only the field of the active mode is checked.
+        assert!(parse_body(
+            r#""http":{"auth":{"mode":"bearer","headerName":"bad name","username":"a:b","queryParam":""}}"#
+        )
+        .is_ok());
+        assert!(parse_body(r#""ws":{"auth":{"mode":"basic","username":""}}"#).is_ok());
+        // A mode the app does not know is a type error, like any other wrong value.
+        assert!(matches!(
+            parse_body(r#""http":{"auth":{"mode":"digest"}}"#),
+            Err(ImportError::InvalidJson { .. })
+        ));
+    }
+
+    #[test]
+    fn import_rejects_bad_template() {
+        assert_eq!(
+            parse_body(r#""http":{"payload":{"mode":"template","template":"not json"}}"#),
+            Err(ImportError::InvalidHttpTemplate {
+                error: TemplateError::NotJson
+            })
+        );
+        assert_eq!(
+            parse_body(r#""ws":{"payload":{"mode":"template","template":"{\"a\":\"{{nope}}\"}"}}"#),
+            Err(ImportError::InvalidWsTemplate {
+                error: TemplateError::UnknownPlaceholder {
+                    name: "nope".into()
+                }
+            })
+        );
+        let big = format!(r#"{{"a":"{}"}}"#, "x".repeat(8192));
+        assert_eq!(
+            parse_body(&format!(
+                r#""http":{{"payload":{{"mode":"template","template":{}}}}}"#,
+                serde_json::to_string(&big).unwrap()
+            )),
+            Err(ImportError::InvalidHttpTemplate {
+                error: TemplateError::TooLarge
+            })
+        );
+        // The template of a standard-mode payload is kept, not validated.
+        assert!(
+            parse_body(r#""http":{"payload":{"mode":"standard","template":"not json"}}"#).is_ok()
+        );
+        // The error says what is wrong, never the template text.
+        let err = parse_body(r#""http":{"payload":{"mode":"template","template":"secret-ish"}}"#)
+            .unwrap_err();
+        assert!(!serde_json::to_string(&err).unwrap().contains("secret-ish"));
+    }
+
+    #[test]
+    fn url_and_token_errors_come_before_auth_and_template_errors() {
+        assert_eq!(
+            parse_body(
+                r#""http":{"auth":{"mode":"header","headerName":"bad name"}},"ws":{"url":"https://x.test"}"#
+            ),
+            Err(ImportError::InvalidWsUrl)
+        );
+        assert_eq!(
+            parse_body(
+                r#""http":{"payload":{"mode":"template","template":"x"}},
+                   "ws":{"auth":{"mode":"header","headerName":"bad name"}}"#
+            ),
+            Err(ImportError::InvalidWsHeaderName)
+        );
+    }
+
+    #[test]
+    fn export_omits_default_auth_and_payload() {
+        let file = export(&sample());
+        assert_eq!(file.http.as_ref().unwrap().auth, None);
+        assert_eq!(file.http.as_ref().unwrap().payload, None);
+        assert_eq!(file.ws.as_ref().unwrap().auth, None);
+        assert_eq!(file.ws.as_ref().unwrap().payload, None);
+        let text = json(&file);
+        assert!(!text.contains("auth") && !text.contains("payload"));
+    }
+
+    #[test]
+    fn export_includes_custom_auth_and_payload() {
+        let cfg = custom();
+        let file = export(&cfg);
+        let text = json(&file);
+        assert!(text.contains(r#""auth":{"mode":"basic""#));
+        assert!(text.contains(r#""payload":{"mode":"template""#));
+        // Only the setting that differs is written.
+        let mut half = sample();
+        half.ws.auth.mode = AuthMode::None;
+        let text = json(&export(&half));
+        assert_eq!(text.matches(r#""auth""#).count(), 1);
+        assert!(!text.contains("payload"));
+
+        let parsed = parse_config_file(&json(&file)).unwrap();
+        assert_eq!(parsed, file);
+        assert_eq!(apply(&IntegrationConfig::default(), &parsed), cfg);
     }
 
     #[test]
@@ -764,6 +1079,103 @@ mod tests {
     }
 
     #[test]
+    fn preview_reports_auth_and_payload_changes() {
+        let current = sample();
+        let p = preview_of(
+            &current,
+            r#""http":{"auth":{"mode":"basic","username":"reader"}},
+               "ws":{"payload":{"mode":"template","template":"{}"}}"#,
+        );
+        assert_eq!(p.http_auth, AuthMode::Basic);
+        assert!(p.http_auth_changed);
+        assert_eq!(p.http_payload, PayloadMode::Standard);
+        assert!(!p.http_payload_changed);
+        assert_eq!(p.ws_auth, AuthMode::Bearer);
+        assert!(!p.ws_auth_changed);
+        assert_eq!(p.ws_payload, PayloadMode::Template);
+        assert!(p.ws_payload_changed);
+
+        let out = serde_json::to_string(&p).unwrap();
+        assert!(out.contains(r#""httpAuth":"basic""#));
+        assert!(out.contains(r#""httpAuthChanged":true"#));
+        assert!(out.contains(r#""wsPayload":"template""#));
+        assert!(out.contains(r#""wsPayloadChanged":true"#));
+        assert!(!out.contains("reader"));
+
+        // The whole setting is compared, not just the mode.
+        let current = custom();
+        let p = preview_of(
+            &current,
+            r#""http":{"auth":{"mode":"basic","username":"other"},
+                       "payload":{"mode":"template","template":"{\"tag\":\"{{uid}}\"}"}}"#,
+        );
+        assert_eq!(p.http_auth, AuthMode::Basic);
+        assert!(p.http_auth_changed);
+        assert!(!p.http_payload_changed);
+        let p = preview_of(
+            &current,
+            r#""http":{"payload":{"mode":"template","template":"{}"}}"#,
+        );
+        assert!(p.http_payload_changed);
+
+        // Repeating the current setting, or sending nothing, changes nothing.
+        let p = preview_of(
+            &current,
+            r#""http":{"auth":{"mode":"basic","username":"reader"}}"#,
+        );
+        assert!(!p.http_auth_changed);
+        let p = preview_of(&current, r#""deviceName":"x""#);
+        assert!(!p.http_auth_changed && !p.ws_auth_changed);
+        assert!(!p.http_payload_changed && !p.ws_payload_changed);
+        assert_eq!(p.ws_auth, AuthMode::Header);
+    }
+
+    #[test]
+    fn switch_to_query_with_kept_token_warns() {
+        let p = preview_of(
+            &sample(),
+            r#""http":{"auth":{"mode":"query"}},"ws":{"auth":{"mode":"query"}}"#,
+        );
+        assert_eq!(p.http_host_before, p.http_host_after);
+        assert_eq!(p.http_token, TokenChange::Unchanged);
+        assert!(p.http_token_to_new_host);
+        assert!(p.ws_token_to_new_host);
+
+        // Repeating the stored token in the file is still a kept token.
+        let p = preview_of(
+            &sample(),
+            r#""http":{"token":"http-secret","auth":{"mode":"query"}}"#,
+        );
+        assert!(p.http_token_to_new_host);
+
+        // From any other mode, not only from bearer.
+        let mut current = sample();
+        current.ws.auth.mode = AuthMode::None;
+        let p = preview_of(&current, r#""ws":{"auth":{"mode":"query"}}"#);
+        assert!(p.ws_token_to_new_host);
+
+        // No warning when the mode stays, the token is replaced or cleared, there is no
+        // token, or the mode is not query.
+        let mut queried = sample();
+        queried.http.auth.mode = AuthMode::Query;
+        let p = preview_of(&queried, r#""http":{"auth":{"mode":"query"}}"#);
+        assert!(!p.http_token_to_new_host);
+        let p = preview_of(
+            &sample(),
+            r#""http":{"token":"fresh","auth":{"mode":"query"}}"#,
+        );
+        assert!(!p.http_token_to_new_host);
+        let p = preview_of(&sample(), r#""http":{"token":"","auth":{"mode":"query"}}"#);
+        assert!(!p.http_token_to_new_host);
+        let mut no_token = sample();
+        no_token.http.token = String::new();
+        let p = preview_of(&no_token, r#""http":{"auth":{"mode":"query"}}"#);
+        assert!(!p.http_token_to_new_host);
+        let p = preview_of(&sample(), r#""http":{"auth":{"mode":"header"}}"#);
+        assert!(!p.http_token_to_new_host);
+    }
+
+    #[test]
     fn import_error_serializes_with_kind_tag() {
         assert_eq!(
             serde_json::to_string(&ImportError::UnsupportedVersion { version: 2 }).unwrap(),
@@ -811,7 +1223,7 @@ mod tests {
         assert_eq!(schema["properties"]["version"]["const"], FORMAT_VERSION);
 
         // The schema describes exactly the fields the parser knows.
-        let full = serde_json::to_value(export(&sample())).unwrap();
+        let full = serde_json::to_value(export(&custom())).unwrap();
         assert_eq!(keys(&schema["properties"]), keys(&full));
         for section in ["http", "ws"] {
             assert_eq!(
@@ -820,6 +1232,96 @@ mod tests {
                 "{section}"
             );
             assert_eq!(schema["properties"][section]["additionalProperties"], true);
+        }
+
+        // The sub-objects list the keys the parser knows, with the enums the code serializes.
+        let auth_keys = keys(&serde_json::to_value(AuthConfig::default()).unwrap());
+        let payload_keys = keys(&serde_json::to_value(PayloadConfig::default()).unwrap());
+        // Adding a variant breaks these matches, as a reminder to extend the schema.
+        let auth_modes = [
+            AuthMode::Bearer,
+            AuthMode::Header,
+            AuthMode::Basic,
+            AuthMode::Query,
+            AuthMode::None,
+        ];
+        let payload_modes = [PayloadMode::Standard, PayloadMode::Template];
+        let _ = |m: AuthMode| match m {
+            AuthMode::Bearer
+            | AuthMode::Header
+            | AuthMode::Basic
+            | AuthMode::Query
+            | AuthMode::None => (),
+        };
+        let _ = |m: PayloadMode| match m {
+            PayloadMode::Standard | PayloadMode::Template => (),
+        };
+        let names = |v: Vec<serde_json::Value>| -> Vec<String> {
+            let mut n: Vec<String> = v.iter().map(|x| x.as_str().unwrap().to_string()).collect();
+            n.sort();
+            n
+        };
+        for section in ["http", "ws"] {
+            let target = &schema["properties"][section]["properties"];
+            assert_eq!(
+                keys(&target["auth"]["properties"]),
+                auth_keys,
+                "{section} auth"
+            );
+            assert_eq!(
+                keys(&target["payload"]["properties"]),
+                payload_keys,
+                "{section} payload"
+            );
+            assert_eq!(
+                names(
+                    target["auth"]["properties"]["mode"]["enum"]
+                        .as_array()
+                        .unwrap()
+                        .clone()
+                ),
+                names(
+                    auth_modes
+                        .iter()
+                        .map(|m| serde_json::to_value(m).unwrap())
+                        .collect()
+                ),
+                "{section} auth.mode"
+            );
+            assert_eq!(
+                names(
+                    target["payload"]["properties"]["mode"]["enum"]
+                        .as_array()
+                        .unwrap()
+                        .clone()
+                ),
+                names(
+                    payload_modes
+                        .iter()
+                        .map(|m| serde_json::to_value(m).unwrap())
+                        .collect()
+                ),
+                "{section} payload.mode"
+            );
+            // The documented defaults are the real ones.
+            assert_eq!(
+                target["auth"]["properties"]["mode"]["default"],
+                serde_json::to_value(AuthConfig::default().mode).unwrap()
+            );
+            assert_eq!(
+                target["auth"]["properties"]["headerName"]["default"],
+                AuthConfig::default().header_name
+            );
+            assert_eq!(
+                target["auth"]["properties"]["queryParam"]["default"],
+                AuthConfig::default().query_param
+            );
+            assert_eq!(
+                target["payload"]["properties"]["mode"]["default"],
+                serde_json::to_value(PayloadConfig::default().mode).unwrap()
+            );
+            assert_eq!(target["auth"]["additionalProperties"], true);
+            assert_eq!(target["payload"]["additionalProperties"], true);
         }
 
         let f = parse_config_file(DOC_EXAMPLE).unwrap();
@@ -936,6 +1438,126 @@ mod tests {
                 doc(r#","http":{"token":"eyJ0.e30-_~+/=!*"},"ws":{"token":"abc"}"#),
                 true,
             ),
+            (
+                "auth and payload",
+                doc(r#","http":{"auth":{"mode":"header","headerName":"X-Key"},
+                       "payload":{"mode":"template","template":"{\"a\":\"{{uid}}\"}"}},
+                       "ws":{"auth":{"mode":"basic","username":"reader"},"payload":{"mode":"standard"}}"#),
+                true,
+            ),
+            (
+                "auth with inactive fields",
+                doc(
+                    r#","http":{"auth":{"mode":"bearer","headerName":"bad name","username":"a:b","queryParam":""}}"#,
+                ),
+                true,
+            ),
+            (
+                "auth empty object",
+                doc(r#","ws":{"auth":{},"payload":{}}"#),
+                true,
+            ),
+            (
+                "auth none",
+                doc(r#","http":{"auth":{"mode":"none"}}"#),
+                true,
+            ),
+            (
+                "auth query",
+                doc(r#","ws":{"auth":{"mode":"query","queryParam":"api_key"}}"#),
+                true,
+            ),
+            (
+                "auth basic empty user",
+                doc(r#","http":{"auth":{"mode":"basic","username":""}}"#),
+                true,
+            ),
+            (
+                "auth header token chars",
+                doc(r#","ws":{"auth":{"mode":"header","headerName":"X-A.b_c~1"}}"#),
+                true,
+            ),
+            (
+                "auth unknown mode",
+                doc(r#","http":{"auth":{"mode":"digest"}}"#),
+                false,
+            ),
+            ("auth not object", doc(r#","http":{"auth":"basic"}"#), false),
+            (
+                "auth mode wrong case",
+                doc(r#","ws":{"auth":{"mode":"Bearer"}}"#),
+                false,
+            ),
+            (
+                "header name with space",
+                doc(r#","http":{"auth":{"mode":"header","headerName":"bad name"}}"#),
+                false,
+            ),
+            (
+                "header name empty",
+                doc(r#","ws":{"auth":{"mode":"header","headerName":""}}"#),
+                false,
+            ),
+            (
+                "header name colon",
+                doc(r#","http":{"auth":{"mode":"header","headerName":"X:Key"}}"#),
+                false,
+            ),
+            (
+                "header name reserved",
+                doc(r#","http":{"auth":{"mode":"header","headerName":"Host"}}"#),
+                false,
+            ),
+            (
+                "header name reserved mixed case",
+                doc(r#","ws":{"auth":{"mode":"header","headerName":"cOnTeNt-TyPe"}}"#),
+                false,
+            ),
+            (
+                "header name websocket prefix",
+                doc(r#","ws":{"auth":{"mode":"header","headerName":"Sec-WebSocket-Key"}}"#),
+                false,
+            ),
+            (
+                "header name reserved only as whole",
+                doc(r#","http":{"auth":{"mode":"header","headerName":"Host-Id"}}"#),
+                true,
+            ),
+            (
+                "username with colon",
+                doc(r#","http":{"auth":{"mode":"basic","username":"a:b"}}"#),
+                false,
+            ),
+            (
+                "username with space",
+                doc(r#","ws":{"auth":{"mode":"basic","username":"a b"}}"#),
+                false,
+            ),
+            (
+                "username non-ascii",
+                doc(r#","ws":{"auth":{"mode":"basic","username":"jörg"}}"#),
+                false,
+            ),
+            (
+                "query param empty",
+                doc(r#","http":{"auth":{"mode":"query","queryParam":""}}"#),
+                false,
+            ),
+            (
+                "query param with equals",
+                doc(r#","ws":{"auth":{"mode":"query","queryParam":"a=b"}}"#),
+                false,
+            ),
+            (
+                "payload unknown mode",
+                doc(r#","http":{"payload":{"mode":"xml"}}"#),
+                false,
+            ),
+            (
+                "template not string",
+                doc(r#","http":{"payload":{"mode":"template","template":{"a":1}}}"#),
+                false,
+            ),
             ("token with space", doc(r#","http":{"token":"a b"}"#), false),
             ("token with tab", doc(r#","ws":{"token":"a\tb"}"#), false),
             (
@@ -958,6 +1580,7 @@ mod tests {
 
         // The parser is deliberately more lenient here (it percent-encodes and lowercases
         // URLs, and trims tokens).
+        // The schema cannot say that a template is valid JSON; the parser checks that.
         const SCHEMA_STRICTER: [&str; 3] = [
             "http space in path",
             "http uppercase scheme",
