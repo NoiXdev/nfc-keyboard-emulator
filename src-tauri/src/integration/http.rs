@@ -1,11 +1,15 @@
 use std::error::Error as _;
 use std::time::Duration;
 
+use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::StatusCode;
+use serde_json::Value;
 use url::Url;
 
+use super::auth::{credential, with_query};
 use super::config::HttpTarget;
 use super::protocol::{ClientMessage, DeliveryError, PROTOCOL_VERSION};
+use super::template::{example_payload, render_template, PayloadMode};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -31,7 +35,7 @@ pub fn http_client(app_version: &str) -> reqwest::Client {
 pub async fn post_message(
     client: &reqwest::Client,
     target: &HttpTarget,
-    msg: &ClientMessage,
+    body: &Value,
 ) -> Result<(), DeliveryError> {
     let url = match Url::parse(&target.url) {
         Ok(url) if matches!(url.scheme(), "http" | "https") && url.host().is_some() => url,
@@ -39,10 +43,17 @@ pub async fn post_message(
     };
     let origin = origin_of(&url);
 
-    let mut request = client.post(url).json(msg);
-    if !target.token.is_empty() {
-        // `bearer_auth` marks the header value as sensitive, so it is never debug-printed.
-        request = request.bearer_auth(&target.token);
+    let cred = credential(&target.auth, &target.token);
+    let mut request = client.post(with_query(&url, &cred)).json(body);
+    if let Some((name, value)) = &cred.header {
+        let invalid = || DeliveryError::Unreachable {
+            message: format!("invalid credentials ({origin})"),
+        };
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| invalid())?;
+        let mut value = HeaderValue::from_str(value).map_err(|_| invalid())?;
+        // A sensitive value is never debug-printed.
+        value.set_sensitive(true);
+        request = request.header(name, value);
     }
 
     let response = request.send().await.map_err(|e| classify(&e, &origin))?;
@@ -55,20 +66,29 @@ pub async fn post_message(
     }
 }
 
+/// With a template the test sends the template rendered with an example scan, so the receiver
+/// sees the shape it will get; otherwise the standard `test` message.
 pub async fn test_http(
     client: &reqwest::Client,
     target: &HttpTarget,
     device: &str,
 ) -> Result<(), DeliveryError> {
-    let msg = ClientMessage::Test {
-        protocol_version: PROTOCOL_VERSION,
-        device: device.to_string(),
+    let body = match target.payload.mode {
+        PayloadMode::Standard => serde_json::to_value(ClientMessage::Test {
+            protocol_version: PROTOCOL_VERSION,
+            device: device.to_string(),
+        })
+        .map_err(|_| DeliveryError::InvalidPayload)?,
+        PayloadMode::Template => {
+            render_template(&target.payload.template, &example_payload(device))
+                .map_err(|_| DeliveryError::InvalidPayload)?
+        }
     };
-    post_message(client, target, &msg).await
+    post_message(client, target, &body).await
 }
 
 /// `scheme://host[:port]` only: path and query may carry secrets and are never reported.
-pub(super) fn origin_of(url: &Url) -> String {
+pub(crate) fn origin_of(url: &Url) -> String {
     let host = url.host_str().unwrap_or_default();
     match url.port() {
         Some(port) => format!("{}://{host}:{port}", url.scheme()),
@@ -111,7 +131,9 @@ fn connect_reason(err: &reqwest::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integration::protocol::{scan_payload, PROTOCOL_VERSION};
+    use crate::integration::auth::{AuthConfig, AuthMode};
+    use crate::integration::protocol::{scan_body, scan_payload};
+    use crate::integration::template::{PayloadConfig, PayloadMode};
     use crate::scan::{ScanRecord, ScanStatus};
     use serde_json::Value;
     use std::time::{Duration, Instant};
@@ -181,7 +203,7 @@ mod tests {
         }
     }
 
-    fn scan_message() -> ClientMessage {
+    fn scan_message() -> Value {
         let rec = ScanRecord {
             timestamp: "2026-10-28T13:45:21.123Z".into(),
             reader: "ACS ACR122U PICC Interface".into(),
@@ -195,9 +217,25 @@ mod tests {
             request_id: None,
             delivery_targets: vec![],
         };
-        ClientMessage::Scan {
-            protocol_version: PROTOCOL_VERSION,
-            payload: scan_payload(&rec, "Reception"),
+        scan_body(&PayloadConfig::default(), scan_payload(&rec, "Reception")).unwrap()
+    }
+
+    fn with_auth(mut t: HttpTarget, auth: AuthConfig) -> HttpTarget {
+        t.auth = auth;
+        t
+    }
+
+    fn auth(mode: AuthMode) -> AuthConfig {
+        AuthConfig {
+            mode,
+            ..AuthConfig::default()
+        }
+    }
+
+    fn template(text: &str) -> PayloadConfig {
+        PayloadConfig {
+            mode: PayloadMode::Template,
+            template: text.into(),
         }
     }
 
@@ -338,5 +376,154 @@ mod tests {
         let body = body_json(&server.await.unwrap());
         assert_eq!(body["type"], "test");
         assert_eq!(body["device"], "Reception");
+    }
+
+    #[tokio::test]
+    async fn custom_header_is_sent() {
+        let (base, server) = serve_once(200).await;
+        let client = http_client("1.2.3");
+        let t = with_auth(target(base, "secret"), auth(AuthMode::Header));
+        post_message(&client, &t, &scan_message()).await.unwrap();
+        let raw = server.await.unwrap().to_lowercase();
+        assert!(raw.contains("\r\nx-api-key: secret\r\n"), "{raw}");
+        assert!(!raw.contains("authorization"), "{raw}");
+    }
+
+    #[tokio::test]
+    async fn basic_header_is_sent() {
+        let (base, server) = serve_once(200).await;
+        let client = http_client("1.2.3");
+        let a = AuthConfig {
+            username: "user".into(),
+            ..auth(AuthMode::Basic)
+        };
+        let t = with_auth(target(base, "pass"), a);
+        post_message(&client, &t, &scan_message()).await.unwrap();
+        let raw = server.await.unwrap().to_lowercase();
+        assert!(
+            raw.contains("\r\nauthorization: basic dxnlcjpwyxnz\r\n"),
+            "{raw}"
+        );
+    }
+
+    #[tokio::test]
+    async fn query_token_is_appended() {
+        let (base, server) = serve_once(200).await;
+        let client = http_client("1.2.3");
+        let t = with_auth(
+            target(format!("{base}/scans"), "secret"),
+            auth(AuthMode::Query),
+        );
+        post_message(&client, &t, &scan_message()).await.unwrap();
+        let raw = server.await.unwrap();
+        assert!(
+            raw.starts_with("POST /scans?token=secret HTTP/1.1"),
+            "{raw}"
+        );
+        assert!(!raw.to_lowercase().contains("authorization"), "{raw}");
+    }
+
+    #[tokio::test]
+    async fn none_sends_no_authorization() {
+        let (base, server) = serve_once(200).await;
+        let client = http_client("1.2.3");
+        let t = with_auth(target(base, "secret"), auth(AuthMode::None));
+        post_message(&client, &t, &scan_message()).await.unwrap();
+        let raw = server.await.unwrap();
+        assert!(!raw.to_lowercase().contains("authorization"), "{raw}");
+        assert!(!raw.contains("secret"), "{raw}");
+    }
+
+    #[tokio::test]
+    async fn unusable_header_value_is_invalid_credentials() {
+        let client = http_client("1.2.3");
+        // A newline can not be part of a header value; the token must not show up in the error.
+        let t = with_auth(
+            target("http://127.0.0.1:9/hook?k=urlsecret".into(), "bad\nsecret"),
+            auth(AuthMode::Header),
+        );
+        let got = post_message(&client, &t, &scan_message()).await;
+        assert_eq!(
+            got,
+            Err(DeliveryError::Unreachable {
+                message: "invalid credentials (http://127.0.0.1:9)".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn template_body_is_sent() {
+        let (base, server) = serve_once(200).await;
+        let client = http_client("1.2.3");
+        let tpl = template(r#"{"card":"{{uid}}","len":"{{uidLength}}"}"#);
+        let rec_payload = crate::integration::template::example_payload("Reception");
+        let body = scan_body(&tpl, rec_payload).unwrap();
+        post_message(&client, &target(base, "t"), &body)
+            .await
+            .unwrap();
+        let sent = body_json(&server.await.unwrap());
+        assert_eq!(sent, body);
+        assert_eq!(sent["card"], "04A1B2C3D4E5F6");
+        assert_eq!(sent["len"], 7);
+    }
+
+    #[tokio::test]
+    async fn test_with_template_sends_example_scan() {
+        let (base, server) = serve_once(200).await;
+        let client = http_client("1.2.3");
+        let mut t = target(base, "t");
+        t.payload = template(r#"{"scanId":"{{scanId}}","dev":"{{device}}"}"#);
+        test_http(&client, &t, "Reception").await.unwrap();
+        let body = body_json(&server.await.unwrap());
+        assert_eq!(body["scanId"], "test");
+        assert_eq!(body["dev"], "Reception");
+        assert!(body.get("type").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_with_invalid_template_is_invalid_payload() {
+        let client = http_client("1.2.3");
+        let mut t = target("http://127.0.0.1:9".into(), "t");
+        t.payload = template("not json");
+        assert_eq!(
+            test_http(&client, &t, "Reception").await,
+            Err(DeliveryError::InvalidPayload)
+        );
+    }
+
+    #[tokio::test]
+    async fn query_token_not_in_error_on_closed_port() {
+        let port = {
+            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let client = http_client("1.2.3");
+        let t = with_auth(
+            target(format!("http://127.0.0.1:{port}/hook"), "secret"),
+            auth(AuthMode::Query),
+        );
+        let err = post_message(&client, &t, &scan_message())
+            .await
+            .unwrap_err();
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(!json.contains("secret"), "{json}");
+        assert!(!json.contains("token="), "{json}");
+    }
+
+    #[tokio::test]
+    async fn query_token_not_in_error_on_401() {
+        let (base, server) = serve_once(401).await;
+        let client = http_client("1.2.3");
+        let t = with_auth(
+            target(format!("{base}/scans"), "secret"),
+            auth(AuthMode::Query),
+        );
+        let err = post_message(&client, &t, &scan_message())
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert_eq!(err, DeliveryError::TokenRejected { status: 401 });
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(!json.contains("secret"), "{json}");
     }
 }

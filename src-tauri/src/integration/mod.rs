@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use crate::config::Config;
 use crate::scan::{DeliveryTarget, ScanRecord};
 use config::IntegrationConfig;
-use protocol::{scan_payload, ClientMessage, DeliveryResult, PROTOCOL_VERSION};
+use protocol::{scan_body, scan_payload, DeliveryResult};
 use requests::RequestSlot;
 use ws::{spawn_ws, WsEvents, WsHandle, WsSettings};
 
@@ -97,12 +97,12 @@ impl IntegrationHub {
             let events = self.events.clone();
             let target = integration.http.clone();
             let scan_id = rec.scan_id.clone();
-            let msg = ClientMessage::Scan {
-                protocol_version: PROTOCOL_VERSION,
-                payload: scan_payload(rec, &device),
-            };
+            let body = scan_body(&target.payload, scan_payload(rec, &device));
             tauri::async_runtime::spawn(async move {
-                let result = http::post_message(&client, &target, &msg).await;
+                let result = match body {
+                    Ok(body) => http::post_message(&client, &target, &body).await,
+                    Err(e) => Err(e),
+                };
                 events.delivery(&DeliveryResult {
                     scan_id,
                     target: DeliveryTarget::Http,
@@ -138,6 +138,7 @@ mod tests {
     use crate::scan::ScanStatus;
     use config::{HttpTarget, WsTarget};
     use protocol::DeliveryError;
+    use template::{PayloadConfig, PayloadMode};
     use ws::WsStatus;
 
     fn record(uid_hex: &str, request_id: Option<&str>) -> ScanRecord {
@@ -310,6 +311,37 @@ mod tests {
             got[0].error,
             Some(DeliveryError::Unreachable { .. })
         ));
+    }
+
+    #[test]
+    fn invalid_stored_template_reports_invalid_payload() {
+        // A template that was valid when saved but can not be rendered now (e.g. a hand-edited
+        // settings file): the scan is not sent and the failure is reported.
+        let mut config = Config::default();
+        config.integration.http = HttpTarget {
+            payload: PayloadConfig {
+                mode: PayloadMode::Template,
+                template: r#"{"a":"{{nope}}"}"#.into(),
+            },
+            ..http(true, &closed_port_url())
+        };
+        let events = Arc::new(Recorder::default());
+        let hub = IntegrationHub::new(
+            Arc::new(Mutex::new(config.clone())),
+            Arc::new(RequestSlot::default()),
+            events.clone(),
+            "1.2.3".into(),
+        );
+
+        let mut rec = ok_record();
+        rec.delivery_targets = route(&config.integration, &rec);
+        hub.dispatch(&rec, &config.integration);
+
+        let got = wait_for_deliveries(&events, 1);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].target, DeliveryTarget::Http);
+        assert!(!got[0].ok);
+        assert_eq!(got[0].error, Some(DeliveryError::InvalidPayload));
     }
 
     #[test]

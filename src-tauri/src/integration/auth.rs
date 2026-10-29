@@ -1,7 +1,3 @@
-// Nothing outside the tests calls this yet; the HTTP and WebSocket senders pick it up next,
-// and this allow goes away with them.
-#![allow(dead_code)]
-
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -224,6 +220,20 @@ mod tests {
             with_query(&url, &c).as_str(),
             "https://x/a?b=1&token=a%26b#f"
         );
+    }
+
+    #[test]
+    fn with_query_keeps_existing_query_verbatim() {
+        let c = credential(&cfg(AuthMode::Query), "a b");
+        for existing in ["q=b%20c", "q=b+c&r=%2F", "q=%zz&flag", "a=1&&b=2"] {
+            let url = Url::parse(&format!("https://x/a?{existing}")).unwrap();
+            let got = with_query(&url, &c);
+            assert_eq!(
+                got.query(),
+                Some(format!("{existing}&token=a+b").as_str()),
+                "{existing}"
+            );
+        }
     }
 
     #[test]

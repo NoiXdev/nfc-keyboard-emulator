@@ -1,7 +1,3 @@
-// Nothing outside the tests calls this yet; the HTTP and WebSocket senders pick it up next,
-// and this allow goes away with them.
-#![allow(dead_code)]
-
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

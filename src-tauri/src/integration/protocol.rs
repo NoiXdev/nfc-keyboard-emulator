@@ -1,6 +1,8 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
+use super::template::{render_template, PayloadConfig, PayloadMode};
 use crate::scan::{DeliveryTarget, ScanRecord};
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -38,6 +40,21 @@ fn wire_timestamp(timestamp: &str) -> String {
                 .to_rfc3339_opts(SecondsFormat::Millis, true)
         })
         .unwrap_or_else(|_| timestamp.to_string())
+}
+
+/// The JSON body for a scan: the standard `scan` message, or the user's template rendered with
+/// the scan. A template that cannot be rendered is `InvalidPayload`; nothing is sent then.
+pub fn scan_body(payload: &PayloadConfig, scan: ScanPayload) -> Result<Value, DeliveryError> {
+    match payload.mode {
+        PayloadMode::Standard => serde_json::to_value(ClientMessage::Scan {
+            protocol_version: PROTOCOL_VERSION,
+            payload: scan,
+        })
+        .map_err(|_| DeliveryError::InvalidPayload),
+        PayloadMode::Template => {
+            render_template(&payload.template, &scan).map_err(|_| DeliveryError::InvalidPayload)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -122,6 +139,7 @@ pub enum DeliveryError {
     TokenRejected { status: u16 },
     HttpStatus { status: u16 },
     NotConnected,
+    InvalidPayload,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,7 +155,7 @@ pub struct DeliveryResult {
 mod tests {
     use super::*;
     use crate::scan::ScanStatus;
-    use serde_json::{json, Value};
+    use serde_json::json;
 
     fn record() -> ScanRecord {
         ScanRecord {
@@ -335,5 +353,49 @@ mod tests {
             serde_json::to_value(r).unwrap(),
             json!({"scanId": "s", "target": "ws", "ok": false, "error": {"kind": "timeout"}})
         );
+    }
+
+    #[test]
+    fn standard_scan_body_unchanged() {
+        let payload = scan_payload(&record(), "Reception");
+        let expected = to_value(&ClientMessage::Scan {
+            protocol_version: PROTOCOL_VERSION,
+            payload: payload.clone(),
+        });
+        assert_eq!(scan_body(&PayloadConfig::default(), payload), Ok(expected));
+    }
+
+    #[test]
+    fn template_scan_body_is_rendered() {
+        let cfg = PayloadConfig {
+            mode: PayloadMode::Template,
+            template: r#"{"id":"{{scanId}}","len":"{{uidLength}}"}"#.into(),
+        };
+        let body = scan_body(&cfg, scan_payload(&record(), "Reception")).unwrap();
+        assert_eq!(
+            body,
+            json!({"id": "6f1c9a52-6c1e-4a59-9a43-1d1f5b0f2b7e", "len": 7})
+        );
+    }
+
+    #[test]
+    fn invalid_template_body_is_invalid_payload() {
+        for template in ["not json", r#"{"a":"{{nope}}"}"#] {
+            let cfg = PayloadConfig {
+                mode: PayloadMode::Template,
+                template: template.into(),
+            };
+            assert_eq!(
+                scan_body(&cfg, scan_payload(&record(), "Reception")),
+                Err(DeliveryError::InvalidPayload),
+                "{template}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_payload_error_shape() {
+        let v = serde_json::to_value(DeliveryError::InvalidPayload).unwrap();
+        assert_eq!(v, json!({"kind": "invalid_payload"}));
     }
 }
