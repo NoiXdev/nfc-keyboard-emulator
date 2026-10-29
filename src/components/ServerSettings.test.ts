@@ -3,7 +3,7 @@ import { mount } from "@vue/test-utils";
 import { flushPromises } from "@vue/test-utils";
 import ServerSettings from "./ServerSettings.vue";
 import { i18n } from "../i18n";
-import { defaultAuth, defaultPayload } from "../lib/template";
+import { defaultAuth, defaultPayload, defaultTemplate } from "../lib/template";
 import { api, type ConfigError, type IntegrationConfig, type WsStatus } from "../lib/tauri";
 
 vi.mock("../lib/tauri", () => ({ api: { testHttp: vi.fn(), testWs: vi.fn() } }));
@@ -186,6 +186,67 @@ describe("ServerSettings", () => {
     const result = w.get('[data-test="http-test-result"]');
     expect(result.classes()).toContain("fail");
     expect(result.text()).toBe(t("delivery.error.timeout"));
+  });
+
+  it("labels the secret Passwort for basic auth and hides it for none", async () => {
+    const w = render();
+    const label = () => w.get('label[for="http-token"]').text();
+    expect(label()).toBe(t("server.token"));
+    await w.get('[data-test="http-auth-mode"]').setValue("basic");
+    expect(label()).toBe(t("server.password"));
+    expect(w.get('[data-test="http-token-reveal"]').text()).toBe(t("server.showPassword"));
+    await w.get('[data-test="http-auth-mode"]').setValue("none");
+    expect(w.find('[data-test="http-token"]').exists()).toBe(false);
+    expect(w.find('[data-test="http-token-reveal"]').exists()).toBe(false);
+    // The ws card is independent.
+    expect(w.find('[data-test="ws-token"]').exists()).toBe(true);
+    await w.get('[data-test="ws-auth-mode"]').setValue("none");
+    expect(w.find('[data-test="ws-token"]').exists()).toBe(false);
+  });
+
+  it("saves auth and payload with the integration", async () => {
+    const w = render();
+    await w.get('[data-test="ws-auth-mode"]').setValue("header");
+    await w.get('[data-test="ws-header-name"]').setValue("X-Reader-Key");
+    await w.get('[data-test="http-payload-mode"]').setValue("template");
+    await w.get('[data-test="save"]').trigger("click");
+    const [saved] = w.emitted("save")![0] as [IntegrationConfig];
+    expect(saved.ws.auth).toEqual({ ...defaultAuth(), mode: "header", headerName: "X-Reader-Key" });
+    expect(saved.http.payload).toEqual({ mode: "template", template: defaultTemplate() });
+    expect(saved.http.auth).toEqual(defaultAuth());
+    expect(saved.ws.payload).toEqual(defaultPayload());
+  });
+
+  it("fills missing auth and payload with the defaults and is not dirty", () => {
+    const legacy = JSON.parse(JSON.stringify(integration));
+    for (const target of [legacy.http, legacy.ws]) {
+      delete target.auth;
+      delete target.payload;
+    }
+    const w = render({ integration: legacy });
+    expect(w.get('[data-test="save"]').attributes("disabled")).toBeDefined();
+    expect(w.get('[data-test="http-advanced"]').attributes("open")).toBeUndefined();
+  });
+
+  it("tests with the unsaved auth and payload", async () => {
+    vi.mocked(api.testHttp).mockResolvedValue(undefined);
+    const w = render();
+    await w.get('[data-test="http-auth-mode"]').setValue("basic");
+    await w.get('[data-test="http-test"]').trigger("click");
+    await flushPromises();
+    expect(vi.mocked(api.testHttp).mock.calls[0][0].auth.mode).toBe("basic");
+  });
+
+  it("previews with the entered device name, or PC when empty", async () => {
+    const w = render({
+      integration: {
+        ...integration,
+        http: { ...integration.http, payload: { mode: "template", template: '{"d":"{{device}}"}' } },
+      },
+    });
+    expect(JSON.parse(w.get('[data-test="http-preview"]').text())).toEqual({ d: "Reception" });
+    await w.get('[data-test="device-name"]').setValue("");
+    expect(JSON.parse(w.get('[data-test="http-preview"]').text())).toEqual({ d: "PC" });
   });
 
   it("asks for confirmation before exporting", async () => {

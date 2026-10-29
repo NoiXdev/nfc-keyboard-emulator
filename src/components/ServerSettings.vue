@@ -3,12 +3,15 @@ import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   api,
+  type AuthMode,
   type ConfigError,
   type DeliveryError,
   type IntegrationConfig,
   type WsStatus,
 } from "../lib/tauri";
 import { deliveryErrorText, serverErrorText } from "../lib/delivery";
+import { defaultAuth, defaultPayload } from "../lib/template";
+import AdvancedSettings from "./AdvancedSettings.vue";
 import Toggle from "./Toggle.vue";
 
 const props = defineProps<{
@@ -25,7 +28,15 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const clone = (i: IntegrationConfig): IntegrationConfig => JSON.parse(JSON.stringify(i));
+// Copies the config; a target without `auth`/`payload` gets the defaults.
+function clone(i: IntegrationConfig): IntegrationConfig {
+  const c: IntegrationConfig = JSON.parse(JSON.stringify(i));
+  c.http.auth ??= defaultAuth();
+  c.http.payload ??= defaultPayload();
+  c.ws.auth ??= defaultAuth();
+  c.ws.payload ??= defaultPayload();
+  return c;
+}
 const local = reactive<IntegrationConfig>(clone(props.integration));
 
 // The parent hands back the stored (normalized) values after a save or an import.
@@ -34,10 +45,18 @@ watch(
   (i) => Object.assign(local, clone(i)),
 );
 
-const dirty = computed(() => JSON.stringify(local) !== JSON.stringify(props.integration));
+const dirty = computed(() => JSON.stringify(local) !== JSON.stringify(clone(props.integration)));
 
 function save() {
   emit("save", clone(local));
+}
+
+// What the example payload shows as the device when the name is left empty.
+const previewDevice = computed(() => local.deviceName.trim() || "PC");
+
+function revealText(mode: AuthMode, shown: boolean): string {
+  const secret = mode === "basic" ? "Password" : "Token";
+  return t(`server.${shown ? "hide" : "show"}${secret}`);
 }
 
 const showHttpToken = ref(false);
@@ -117,25 +136,35 @@ function confirmExport() {
     <div class="grid">
       <label for="http-url">{{ t("server.url") }}</label>
       <input id="http-url" v-model="local.http.url" data-test="http-url" placeholder="https://" />
-      <label for="http-token">{{ t("server.token") }}</label>
-      <div class="token">
-        <input
-          id="http-token"
-          v-model="local.http.token"
-          data-test="http-token"
-          :type="showHttpToken ? 'text' : 'password'"
-          autocomplete="off"
-        />
-        <button
-          type="button"
-          class="btn"
-          data-test="http-token-reveal"
-          @click="showHttpToken = !showHttpToken"
-        >
-          {{ showHttpToken ? t("server.hideToken") : t("server.showToken") }}
-        </button>
-      </div>
+      <template v-if="local.http.auth.mode !== 'none'">
+        <label for="http-token">{{
+          local.http.auth.mode === "basic" ? t("server.password") : t("server.token")
+        }}</label>
+        <div class="token">
+          <input
+            id="http-token"
+            v-model="local.http.token"
+            data-test="http-token"
+            :type="showHttpToken ? 'text' : 'password'"
+            autocomplete="off"
+          />
+          <button
+            type="button"
+            class="btn"
+            data-test="http-token-reveal"
+            @click="showHttpToken = !showHttpToken"
+          >
+            {{ revealText(local.http.auth.mode, showHttpToken) }}
+          </button>
+        </div>
+      </template>
     </div>
+    <AdvancedSettings
+      v-model:auth="local.http.auth"
+      v-model:payload="local.http.payload"
+      target="http"
+      :device="previewDevice"
+    />
     <div class="actions">
       <button
         type="button"
@@ -161,24 +190,28 @@ function confirmExport() {
     <div class="grid">
       <label for="ws-url">{{ t("server.url") }}</label>
       <input id="ws-url" v-model="local.ws.url" data-test="ws-url" placeholder="wss://" />
-      <label for="ws-token">{{ t("server.token") }}</label>
-      <div class="token">
-        <input
-          id="ws-token"
-          v-model="local.ws.token"
-          data-test="ws-token"
-          :type="showWsToken ? 'text' : 'password'"
-          autocomplete="off"
-        />
-        <button
-          type="button"
-          class="btn"
-          data-test="ws-token-reveal"
-          @click="showWsToken = !showWsToken"
-        >
-          {{ showWsToken ? t("server.hideToken") : t("server.showToken") }}
-        </button>
-      </div>
+      <template v-if="local.ws.auth.mode !== 'none'">
+        <label for="ws-token">{{
+          local.ws.auth.mode === "basic" ? t("server.password") : t("server.token")
+        }}</label>
+        <div class="token">
+          <input
+            id="ws-token"
+            v-model="local.ws.token"
+            data-test="ws-token"
+            :type="showWsToken ? 'text' : 'password'"
+            autocomplete="off"
+          />
+          <button
+            type="button"
+            class="btn"
+            data-test="ws-token-reveal"
+            @click="showWsToken = !showWsToken"
+          >
+            {{ revealText(local.ws.auth.mode, showWsToken) }}
+          </button>
+        </div>
+      </template>
     </div>
     <div class="opt-row">
       <Toggle v-model="local.ws.stream" data-test="ws-stream" />
@@ -201,6 +234,12 @@ function confirmExport() {
         {{ t("server.reconnect") }}
       </button>
     </div>
+    <AdvancedSettings
+      v-model:auth="local.ws.auth"
+      v-model:payload="local.ws.payload"
+      target="ws"
+      :device="previewDevice"
+    />
     <div class="actions">
       <button
         type="button"
