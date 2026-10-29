@@ -45,6 +45,9 @@ every scanned card UID is entered for you — exactly as if you had typed it.
   so a card is never read (and typed) twice.
 - **Your server, optionally** — send scans to your own server, or let a web app request a
   scan. Off by default; see the [server integration guide](https://docs.noix.dev/nfc-keyboard-emulator/guide/server-integration/).
+- **Fits your server** — under **Advanced** in the Server view, choose how the token is
+  sent (bearer token, custom header, basic auth, URL parameter or none) and send scans in
+  your own JSON format with a template, for example for an existing webhook.
 - **Private by default** — scan data is sent only to servers you enter, and only for the
   modes you switch on. At startup the app asks GitHub whether a newer version exists; no
   scan data is sent with that request.

@@ -37,6 +37,9 @@ and reads card UIDs over the PC/SC smartcard API. Card UIDs stay on the machine 
 default; they are sent only to servers the user enters, and only for the modes the
 user switches on. At startup the app asks GitHub whether a newer version exists, and
 no scan data is sent with that request. The app stores a local settings file, which
-includes any server tokens the user enters. Reports
+includes any server tokens the user enters. If a token is configured to be sent as a
+URL parameter, it is part of the address and can end up in server and proxy logs
+on the way; the app never writes it to its own logs or error messages, and the other
+transports (bearer token, custom header, basic auth) are preferable. Reports
 concerning the keystroke-injection path, the reader/worker boundary, or the
 release/signing pipeline are especially welcome.
