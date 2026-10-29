@@ -18,7 +18,6 @@ use crate::state::{save_config, AppState};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
-use url::Url;
 
 fn send_worker(state: &AppState, cmd: WorkerCommand) {
     if let Some(tx) = state.worker_tx.lock().unwrap().as_ref() {
@@ -282,18 +281,9 @@ fn test_device(device_name: String) -> String {
 }
 
 /// A test must not send what saving would reject: checks the auth and payload settings before
-/// anything is sent. Errors carry the origin only, never a credential.
-fn validate_test_target(
-    url: &str,
-    auth: &AuthConfig,
-    payload: &PayloadConfig,
-) -> Result<(), DeliveryError> {
-    if validate_auth(auth).is_err() {
-        let url = Url::parse(url).map_err(|_| DeliveryError::InvalidUrl)?;
-        return Err(DeliveryError::Unreachable {
-            message: format!("invalid credentials ({})", http::origin_of(&url)),
-        });
-    }
+/// anything is sent. Errors name the invalid field, never a value.
+fn validate_test_target(auth: &AuthConfig, payload: &PayloadConfig) -> Result<(), DeliveryError> {
+    validate_auth(auth).map_err(|field| DeliveryError::InvalidAuth { field })?;
     validate_payload(payload).map_err(|_| DeliveryError::InvalidPayload)
 }
 
@@ -311,7 +301,7 @@ pub async fn test_http(
         ..http
     };
     normalize_target_auth(&mut target.auth);
-    validate_test_target(&target.url, &target.auth, &target.payload)?;
+    validate_test_target(&target.auth, &target.payload)?;
     http::test_http(hub.http(), &target, &test_device(device_name)).await
 }
 
@@ -327,7 +317,7 @@ pub async fn test_ws(
         ..ws
     };
     normalize_target_auth(&mut target.auth);
-    validate_test_target(&target.url, &target.auth, &target.payload)?;
+    validate_test_target(&target.auth, &target.payload)?;
     ws::test_ws(
         &target,
         &test_device(device_name),
@@ -349,7 +339,7 @@ pub fn get_ws_status(hub: State<Arc<IntegrationHub>>) -> WsStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integration::auth::AuthMode;
+    use crate::integration::auth::{AuthError, AuthMode};
     use crate::integration::config_file::{parse_config_file, ImportSource};
     use crate::integration::template::PayloadMode;
 
@@ -362,47 +352,57 @@ mod tests {
 
     #[test]
     fn test_target_accepts_defaults_and_valid_settings() {
-        let url = "https://x.test/hook";
         assert_eq!(
-            validate_test_target(url, &AuthConfig::default(), &PayloadConfig::default()),
+            validate_test_target(&AuthConfig::default(), &PayloadConfig::default()),
             Ok(())
         );
         assert_eq!(
-            validate_test_target(url, &AuthConfig::default(), &template(r#"{"u":"{{uid}}"}"#)),
+            validate_test_target(&AuthConfig::default(), &template(r#"{"u":"{{uid}}"}"#)),
             Ok(())
         );
     }
 
     #[test]
-    fn test_target_rejects_invalid_auth_with_origin_only() {
-        let auth = AuthConfig {
-            mode: AuthMode::Header,
-            header_name: "bad name".into(),
-            ..AuthConfig::default()
-        };
-        let got = validate_test_target(
-            "https://x.test:8443/hook?key=urlsecret",
-            &auth,
-            &PayloadConfig::default(),
-        );
-        assert_eq!(
-            got,
-            Err(DeliveryError::Unreachable {
-                message: "invalid credentials (https://x.test:8443)".into()
-            })
-        );
-        // Without a parsable URL there is no origin to name.
-        assert_eq!(
-            validate_test_target("not a url", &auth, &PayloadConfig::default()),
-            Err(DeliveryError::InvalidUrl)
-        );
+    fn test_target_names_the_invalid_auth_field_only() {
+        let cases = [
+            (
+                AuthConfig {
+                    mode: AuthMode::Header,
+                    header_name: "bad name".into(),
+                    ..AuthConfig::default()
+                },
+                AuthError::HeaderName,
+            ),
+            (
+                AuthConfig {
+                    mode: AuthMode::Basic,
+                    username: "a:b".into(),
+                    ..AuthConfig::default()
+                },
+                AuthError::Username,
+            ),
+            (
+                AuthConfig {
+                    mode: AuthMode::Query,
+                    query_param: String::new(),
+                    ..AuthConfig::default()
+                },
+                AuthError::QueryParam,
+            ),
+        ];
+        for (auth, field) in cases {
+            assert_eq!(
+                validate_test_target(&auth, &PayloadConfig::default()),
+                Err(DeliveryError::InvalidAuth { field })
+            );
+        }
     }
 
     #[test]
     fn test_target_rejects_invalid_template() {
         for text in ["not json", r#"{"a":"{{nope}}"}"#] {
             assert_eq!(
-                validate_test_target("https://x.test", &AuthConfig::default(), &template(text)),
+                validate_test_target(&AuthConfig::default(), &template(text)),
                 Err(DeliveryError::InvalidPayload),
                 "{text}"
             );

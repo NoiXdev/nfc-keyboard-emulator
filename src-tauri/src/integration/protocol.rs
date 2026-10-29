@@ -2,6 +2,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::auth::AuthError;
 use super::template::{render_template, PayloadConfig, PayloadMode};
 use crate::scan::{DeliveryTarget, ScanRecord};
 
@@ -43,7 +44,9 @@ fn wire_timestamp(timestamp: &str) -> String {
 }
 
 /// The JSON body for a scan: the standard `scan` message, or the user's template rendered with
-/// the scan. A template that cannot be rendered is `InvalidPayload`; nothing is sent then.
+/// the scan. A template that cannot be rendered is `InvalidPayload`: no HTTP request is made
+/// and no stream frame is sent (a WebSocket `scan_response` still goes out in the standard
+/// format).
 pub fn scan_body(payload: &PayloadConfig, scan: ScanPayload) -> Result<Value, DeliveryError> {
     match payload.mode {
         PayloadMode::Standard => serde_json::to_value(ClientMessage::Scan {
@@ -134,12 +137,22 @@ pub fn parse_server_message(text: &str) -> Option<ServerMessage> {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DeliveryError {
     InvalidUrl,
-    Unreachable { message: String },
+    Unreachable {
+        message: String,
+    },
     Timeout,
-    TokenRejected { status: u16 },
-    HttpStatus { status: u16 },
+    TokenRejected {
+        status: u16,
+    },
+    HttpStatus {
+        status: u16,
+    },
     NotConnected,
     InvalidPayload,
+    /// The auth settings of a test are invalid; names the field, never a value.
+    InvalidAuth {
+        field: AuthError,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -397,5 +410,17 @@ mod tests {
     fn invalid_payload_error_shape() {
         let v = serde_json::to_value(DeliveryError::InvalidPayload).unwrap();
         assert_eq!(v, json!({"kind": "invalid_payload"}));
+    }
+
+    #[test]
+    fn invalid_auth_error_shape() {
+        for (field, name) in [
+            (AuthError::HeaderName, "header_name"),
+            (AuthError::Username, "username"),
+            (AuthError::QueryParam, "query_param"),
+        ] {
+            let v = serde_json::to_value(DeliveryError::InvalidAuth { field }).unwrap();
+            assert_eq!(v, json!({"kind": "invalid_auth", "field": name}));
+        }
     }
 }

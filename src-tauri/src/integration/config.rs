@@ -77,8 +77,7 @@ pub enum ConfigError {
     InvalidWsTemplate { error: TemplateError },
 }
 
-/// Trims the auth names. The token and the template are not touched here: the token is trimmed
-/// with the other strings, the template is never trimmed.
+/// Trims the auth names (header name, username, parameter name).
 pub(crate) fn normalize_target_auth(auth: &mut AuthConfig) {
     for s in [
         &mut auth.header_name,

@@ -156,7 +156,7 @@ enum Segment<'a> {
 }
 
 /// Splits a string at `{{ name }}` placeholders: a name is letters, digits and underscores
-/// (not starting with a digit), with optional spaces inside the braces. Anything else, such
+/// (not starting with a digit), with optional ASCII whitespace inside the braces. Anything else, such
 /// as `{{}}`, `{ {uid} }` or an unclosed `{{uid`, stays literal text.
 fn segments(s: &str) -> Vec<Segment<'_>> {
     let mut out = Vec::new();
@@ -196,7 +196,6 @@ fn is_identifier(name: &str) -> bool {
 mod tests {
     use super::*;
     use chrono::DateTime;
-    use serde::Deserialize;
 
     #[derive(Deserialize)]
     struct Vector {

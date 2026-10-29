@@ -342,6 +342,8 @@ pub struct ImportPreview {
     pub http_token: TokenChange,
     /// The stored, non-empty HTTP token is kept but goes to another scheme or host.
     pub http_token_to_new_host: bool,
+    /// The stored, non-empty HTTP token is kept but its mode switches to the URL query.
+    pub http_token_to_query: bool,
     /// `https` becomes `http`.
     pub http_downgrade: bool,
     pub http_auth: AuthMode,
@@ -357,6 +359,8 @@ pub struct ImportPreview {
     pub ws_token: TokenChange,
     /// The stored, non-empty WebSocket token is kept but goes to another scheme or host.
     pub ws_token_to_new_host: bool,
+    /// The stored, non-empty WebSocket token is kept but its mode switches to the URL query.
+    pub ws_token_to_query: bool,
     /// `wss` becomes `ws`.
     pub ws_downgrade: bool,
     pub ws_auth: AuthMode,
@@ -396,6 +400,7 @@ pub fn preview(
         http_host_after: http.after,
         http_token: token_change(&current.http.token, http_token),
         http_token_to_new_host: http.token_to_new_host,
+        http_token_to_query: http.token_to_query,
         http_downgrade: http.downgrade,
         http_auth: after.http.auth.mode,
         http_auth_changed: after.http.auth != current.http.auth,
@@ -407,6 +412,7 @@ pub fn preview(
         ws_request: after.ws.request,
         ws_token: token_change(&current.ws.token, ws_token),
         ws_token_to_new_host: ws.token_to_new_host,
+        ws_token_to_query: ws.token_to_query,
         ws_downgrade: ws.downgrade,
         ws_auth: after.ws.auth.mode,
         ws_auth_changed: after.ws.auth != current.ws.auth,
@@ -420,13 +426,15 @@ struct HostChange {
     before: Option<String>,
     after: Option<String>,
     token_to_new_host: bool,
+    token_to_query: bool,
     downgrade: bool,
 }
 
 impl HostChange {
     /// `before` and `after` are `(url, token)`; `modes` are the auth modes before and after;
-    /// `secure` is the scheme that encrypts. A kept token that moves into the URL query also
-    /// counts as going somewhere new: URLs end up in logs and histories.
+    /// `secure` is the scheme that encrypts. A kept token only counts when the mode after the
+    /// import sends it at all; a switch to the URL query is flagged on its own, as URLs end up
+    /// in logs and histories.
     fn new(
         before: (&str, &str),
         after: (&str, &str),
@@ -437,12 +445,13 @@ impl HostChange {
         let new = Url::parse(after.0).ok().filter(Url::has_host);
         let old_origin = old.as_ref().map(origin_of);
         let new_origin = new.as_ref().map(origin_of);
-        let token_kept = !before.1.is_empty() && after.1 == before.1;
+        let token_sent = !before.1.is_empty() && after.1 == before.1 && modes.1 != AuthMode::None;
         Self {
-            token_to_new_host: token_kept
+            token_to_new_host: token_sent && new_origin.is_some() && new_origin != old_origin,
+            token_to_query: token_sent
                 && new_origin.is_some()
-                && (new_origin != old_origin
-                    || (modes.0 != AuthMode::Query && modes.1 == AuthMode::Query)),
+                && modes.0 != AuthMode::Query
+                && modes.1 == AuthMode::Query,
             downgrade: old.is_some_and(|u| u.scheme() == secure)
                 && new.is_some_and(|u| u.scheme() != secure),
             before: old_origin,
@@ -1145,48 +1154,92 @@ mod tests {
     }
 
     #[test]
-    fn switch_to_query_with_kept_token_warns() {
+    fn switch_to_query_with_kept_token_warns_separately() {
         let p = preview_of(
             &sample(),
             r#""http":{"auth":{"mode":"query"}},"ws":{"auth":{"mode":"query"}}"#,
         );
         assert_eq!(p.http_host_before, p.http_host_after);
         assert_eq!(p.http_token, TokenChange::Unchanged);
-        assert!(p.http_token_to_new_host);
-        assert!(p.ws_token_to_new_host);
+        assert!(p.http_token_to_query);
+        assert!(p.ws_token_to_query);
+        // The host stays, so this is not a new-host warning.
+        assert!(!p.http_token_to_new_host);
+        assert!(!p.ws_token_to_new_host);
 
         // Repeating the stored token in the file is still a kept token.
         let p = preview_of(
             &sample(),
             r#""http":{"token":"http-secret","auth":{"mode":"query"}}"#,
         );
-        assert!(p.http_token_to_new_host);
+        assert!(p.http_token_to_query && !p.http_token_to_new_host);
 
         // From any other mode, not only from bearer.
         let mut current = sample();
         current.ws.auth.mode = AuthMode::None;
         let p = preview_of(&current, r#""ws":{"auth":{"mode":"query"}}"#);
-        assert!(p.ws_token_to_new_host);
+        assert!(p.ws_token_to_query);
+
+        // A real host change in the same step raises both warnings.
+        let p = preview_of(
+            &sample(),
+            r#""http":{"url":"https://evil.example/hook","auth":{"mode":"query"}}"#,
+        );
+        assert!(p.http_token_to_query && p.http_token_to_new_host);
 
         // No warning when the mode stays, the token is replaced or cleared, there is no
         // token, or the mode is not query.
         let mut queried = sample();
         queried.http.auth.mode = AuthMode::Query;
         let p = preview_of(&queried, r#""http":{"auth":{"mode":"query"}}"#);
-        assert!(!p.http_token_to_new_host);
+        assert!(!p.http_token_to_query);
         let p = preview_of(
             &sample(),
             r#""http":{"token":"fresh","auth":{"mode":"query"}}"#,
         );
-        assert!(!p.http_token_to_new_host);
+        assert!(!p.http_token_to_query);
         let p = preview_of(&sample(), r#""http":{"token":"","auth":{"mode":"query"}}"#);
-        assert!(!p.http_token_to_new_host);
+        assert!(!p.http_token_to_query);
         let mut no_token = sample();
         no_token.http.token = String::new();
         let p = preview_of(&no_token, r#""http":{"auth":{"mode":"query"}}"#);
-        assert!(!p.http_token_to_new_host);
+        assert!(!p.http_token_to_query);
         let p = preview_of(&sample(), r#""http":{"auth":{"mode":"header"}}"#);
+        assert!(!p.http_token_to_query && !p.http_token_to_new_host);
+
+        // Without a URL nothing is sent, so there is nothing to warn about.
+        let p = preview_of(&sample(), r#""http":{"url":"","auth":{"mode":"query"}}"#);
+        assert!(!p.http_token_to_query);
+
+        let out = serde_json::to_string(&preview_of(
+            &sample(),
+            r#""http":{"auth":{"mode":"query"}}"#,
+        ))
+        .unwrap();
+        assert!(out.contains(r#""httpTokenToQuery":true"#));
+        assert!(out.contains(r#""wsTokenToQuery":false"#));
+    }
+
+    #[test]
+    fn no_token_warning_when_auth_mode_none() {
+        // Mode none sends nothing, so a new host or scheme gets no token.
+        let p = preview_of(
+            &sample(),
+            r#""http":{"url":"https://evil.example/hook","auth":{"mode":"none"}},
+               "ws":{"url":"wss://evil.example/ws","auth":{"mode":"none"}}"#,
+        );
+        assert!(!p.http_token_to_new_host && !p.ws_token_to_new_host);
+        assert!(!p.http_token_to_query && !p.ws_token_to_query);
+
+        // The same holds when the stored mode is already none.
+        let mut current = sample();
+        current.http.auth.mode = AuthMode::None;
+        let p = preview_of(&current, r#""http":{"url":"https://evil.example/hook"}"#);
         assert!(!p.http_token_to_new_host);
+
+        // A downgrade is still reported.
+        let p = preview_of(&current, r#""http":{"url":"http://example.com/api/scans"}"#);
+        assert!(p.http_downgrade && !p.http_token_to_new_host);
     }
 
     #[test]
@@ -1593,8 +1646,9 @@ mod tests {
         ];
 
         // The parser is deliberately more lenient here (it percent-encodes and lowercases
-        // URLs, and trims tokens).
-        // The schema cannot say that a template is valid JSON; the parser checks that.
+        // URLs, and trims tokens). The opposite gap, a template that is not valid JSON or
+        // names an unknown placeholder, is not in the corpus: the schema cannot express it
+        // and only the parser rejects it (see `import_rejects_bad_template`).
         const SCHEMA_STRICTER: [&str; 3] = [
             "http space in path",
             "http uppercase scheme",
