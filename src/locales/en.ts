@@ -210,6 +210,7 @@ export default {
     tokenUnchanged: "unchanged",
     tokenSet: "will be set",
     tokenCleared: "will be cleared",
+    changed: "changed",
     apply: "Apply",
     cancel: "Cancel",
     errorTitle: "Import failed",

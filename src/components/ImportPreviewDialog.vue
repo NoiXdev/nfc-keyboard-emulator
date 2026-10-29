@@ -68,6 +68,20 @@ const warnings = computed(() => {
         <dd data-test="http-token" :class="{ changed: preview.httpToken !== 'unchanged' }">
           {{ tokenText(preview.httpToken) }}
         </dd>
+        <template v-if="preview.httpAuthChanged">
+          <dt>{{ t("server.advanced.authMode") }}</dt>
+          <dd data-test="http-auth" class="changed">
+            {{ t(`server.advanced.auth.${preview.httpAuth}`) }}
+            <span class="marker">({{ t("import.changed") }})</span>
+          </dd>
+        </template>
+        <template v-if="preview.httpPayloadChanged">
+          <dt>{{ t("server.advanced.payloadMode") }}</dt>
+          <dd data-test="http-payload" class="changed">
+            {{ t(`server.advanced.payload.${preview.httpPayload}`) }}
+            <span class="marker">({{ t("import.changed") }})</span>
+          </dd>
+        </template>
 
         <dt>{{ t("import.wsStream") }}</dt>
         <dd data-test="ws-stream">{{ onOff(preview.wsStream) }}</dd>
@@ -84,6 +98,20 @@ const warnings = computed(() => {
         <dd data-test="ws-token" :class="{ changed: preview.wsToken !== 'unchanged' }">
           {{ tokenText(preview.wsToken) }}
         </dd>
+        <template v-if="preview.wsAuthChanged">
+          <dt>{{ t("server.advanced.authMode") }}</dt>
+          <dd data-test="ws-auth" class="changed">
+            {{ t(`server.advanced.auth.${preview.wsAuth}`) }}
+            <span class="marker">({{ t("import.changed") }})</span>
+          </dd>
+        </template>
+        <template v-if="preview.wsPayloadChanged">
+          <dt>{{ t("server.advanced.payloadMode") }}</dt>
+          <dd data-test="ws-payload" class="changed">
+            {{ t(`server.advanced.payload.${preview.wsPayload}`) }}
+            <span class="marker">({{ t("import.changed") }})</span>
+          </dd>
+        </template>
       </dl>
       <div class="buttons">
         <button type="button" class="btn" data-test="cancel" @click="$emit('cancel', preview.id)">
@@ -144,6 +172,10 @@ dd {
 }
 dd.changed {
   font-weight: 600;
+}
+.marker {
+  color: #5b6478;
+  font-weight: 400;
 }
 .before {
   color: #5b6478;

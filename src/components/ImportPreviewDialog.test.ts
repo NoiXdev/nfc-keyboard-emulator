@@ -102,6 +102,33 @@ describe("ImportPreviewDialog", () => {
     expect(warnings.text()).toContain(t("import.warnDowngrade", { target: t("import.targetHttp") }));
   });
 
+  it("shows an auth row with a changed marker when the HTTP auth changes", () => {
+    const w = render({ ...preview, httpAuth: "basic", httpAuthChanged: true });
+    const row = w.get('[data-test="http-auth"]');
+    expect(row.text()).toContain(t("server.advanced.auth.basic"));
+    expect(row.text()).toContain(t("import.changed"));
+    expect(row.classes()).toContain("changed");
+    expect(w.text()).toContain(t("server.advanced.authMode"));
+    expect(w.find('[data-test="ws-auth"]').exists()).toBe(false);
+  });
+
+  it("shows a payload row with a changed marker when the WebSocket payload changes", () => {
+    const w = render({ ...preview, wsPayload: "template", wsPayloadChanged: true });
+    const row = w.get('[data-test="ws-payload"]');
+    expect(row.text()).toContain(t("server.advanced.payload.template"));
+    expect(row.text()).toContain(t("import.changed"));
+    expect(w.text()).toContain(t("server.advanced.payloadMode"));
+    expect(w.find('[data-test="http-payload"]').exists()).toBe(false);
+  });
+
+  it("shows no auth or payload rows when nothing changed", () => {
+    const w = render();
+    for (const id of ["http-auth", "http-payload", "ws-auth", "ws-payload"]) {
+      expect(w.find(`[data-test="${id}"]`).exists()).toBe(false);
+    }
+    expect(w.text()).not.toContain(t("import.changed"));
+  });
+
   it("never renders a token field", () => {
     const leaky = { ...preview, token: "LEAK", httpTokenValue: "LEAK" } as ImportPreview;
     expect(render(leaky).html()).not.toContain("LEAK");
