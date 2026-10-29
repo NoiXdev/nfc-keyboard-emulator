@@ -237,13 +237,8 @@ pub fn apply(cfg: &IntegrationConfig, f: &ServerConfigFile) -> IntegrationConfig
     out
 }
 
-/// `Some` only for a non-default value, so a plain config exports without the new keys.
-fn unless_default<T: Default + PartialEq + Clone>(v: &T) -> Option<T> {
-    (*v != T::default()).then(|| v.clone())
-}
-
-/// The current settings as a config file, tokens included. Auth and payload are written only
-/// when they differ from the defaults.
+/// The current settings as a config file, tokens included. A full snapshot: every key is
+/// written, defaults too, so importing it onto another device restores exactly these settings.
 pub fn export(cfg: &IntegrationConfig) -> ServerConfigFile {
     ServerConfigFile {
         schema: Some(SCHEMA_URL.to_string()),
@@ -254,16 +249,16 @@ pub fn export(cfg: &IntegrationConfig) -> ServerConfigFile {
             enabled: Some(cfg.http.enabled),
             url: Some(cfg.http.url.clone()),
             token: Some(cfg.http.token.clone()),
-            auth: unless_default(&cfg.http.auth),
-            payload: unless_default(&cfg.http.payload),
+            auth: Some(cfg.http.auth.clone()),
+            payload: Some(cfg.http.payload.clone()),
         }),
         ws: Some(WsPatch {
             url: Some(cfg.ws.url.clone()),
             token: Some(cfg.ws.token.clone()),
             stream: Some(cfg.ws.stream),
             request: Some(cfg.ws.request),
-            auth: unless_default(&cfg.ws.auth),
-            payload: unless_default(&cfg.ws.payload),
+            auth: Some(cfg.ws.auth.clone()),
+            payload: Some(cfg.ws.payload.clone()),
         }),
     }
 }
@@ -690,14 +685,40 @@ mod tests {
     }
 
     #[test]
-    fn export_omits_default_auth_and_payload() {
+    fn export_writes_default_auth_and_payload_explicitly() {
         let file = export(&sample());
-        assert_eq!(file.http.as_ref().unwrap().auth, None);
-        assert_eq!(file.http.as_ref().unwrap().payload, None);
-        assert_eq!(file.ws.as_ref().unwrap().auth, None);
-        assert_eq!(file.ws.as_ref().unwrap().payload, None);
+        for (auth, payload) in [
+            (
+                &file.http.as_ref().unwrap().auth,
+                &file.http.as_ref().unwrap().payload,
+            ),
+            (
+                &file.ws.as_ref().unwrap().auth,
+                &file.ws.as_ref().unwrap().payload,
+            ),
+        ] {
+            assert_eq!(auth.as_ref(), Some(&AuthConfig::default()));
+            assert_eq!(payload.as_ref(), Some(&PayloadConfig::default()));
+        }
         let text = json(&file);
-        assert!(!text.contains("auth") && !text.contains("payload"));
+        assert_eq!(text.matches(r#""auth":{"mode":"bearer""#).count(), 2);
+        assert_eq!(text.matches(r#""payload":{"mode":"standard""#).count(), 2);
+    }
+
+    #[test]
+    fn importing_a_default_export_resets_custom_auth() {
+        let current = custom();
+        let f = parse_config_file(&json(&export(&sample()))).unwrap();
+        let out = apply(&current, &f);
+        assert_eq!(out, sample());
+        assert_eq!(out.http.auth, AuthConfig::default());
+        assert_eq!(out.ws.payload, PayloadConfig::default());
+
+        let p = preview(&current, &f, ImportSource::File);
+        assert!(p.http_auth_changed && p.ws_auth_changed);
+        assert!(p.http_payload_changed && p.ws_payload_changed);
+        assert_eq!(p.http_auth, AuthMode::Bearer);
+        assert_eq!(p.ws_payload, PayloadMode::Standard);
     }
 
     #[test]
@@ -707,13 +728,6 @@ mod tests {
         let text = json(&file);
         assert!(text.contains(r#""auth":{"mode":"basic""#));
         assert!(text.contains(r#""payload":{"mode":"template""#));
-        // Only the setting that differs is written.
-        let mut half = sample();
-        half.ws.auth.mode = AuthMode::None;
-        let text = json(&export(&half));
-        assert_eq!(text.matches(r#""auth""#).count(), 1);
-        assert!(!text.contains("payload"));
-
         let parsed = parse_config_file(&json(&file)).unwrap();
         assert_eq!(parsed, file);
         assert_eq!(apply(&IntegrationConfig::default(), &parsed), cfg);
