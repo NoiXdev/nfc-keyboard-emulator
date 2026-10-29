@@ -16,6 +16,10 @@ const preview: ImportPreview = {
   httpToken: "set",
   httpTokenToNewHost: false,
   httpDowngrade: false,
+  httpAuth: "bearer",
+  httpAuthChanged: false,
+  httpPayload: "standard",
+  httpPayloadChanged: false,
   wsHostBefore: "wss://ws.example.com",
   wsHostAfter: "wss://ws.example.com",
   wsStream: true,
@@ -23,6 +27,10 @@ const preview: ImportPreview = {
   wsToken: "unchanged",
   wsTokenToNewHost: false,
   wsDowngrade: false,
+  wsAuth: "bearer",
+  wsAuthChanged: false,
+  wsPayload: "standard",
+  wsPayloadChanged: false,
 };
 
 const render = (p: ImportPreview = preview) =>

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { TemplateError } from "./template";
 
 export type Case = "upper" | "lower";
 export type ByteOrder = "normal" | "reversed";
@@ -13,10 +14,29 @@ export interface FormatConfig {
   suffix: Suffix;
 }
 
+export type AuthMode = "bearer" | "header" | "basic" | "query" | "none";
+
+/** Only the field of the active mode matters; the others are kept so switching loses nothing. */
+export interface AuthConfig {
+  mode: AuthMode;
+  headerName: string;
+  username: string;
+  queryParam: string;
+}
+
+export type PayloadMode = "standard" | "template";
+
+export interface PayloadConfig {
+  mode: PayloadMode;
+  template: string;
+}
+
 export interface HttpTarget {
   enabled: boolean;
   url: string;
   token: string;
+  auth: AuthConfig;
+  payload: PayloadConfig;
 }
 
 export interface WsTarget {
@@ -24,6 +44,8 @@ export interface WsTarget {
   token: string;
   stream: boolean;
   request: boolean;
+  auth: AuthConfig;
+  payload: PayloadConfig;
 }
 
 export interface IntegrationConfig {
@@ -72,7 +94,8 @@ export type DeliveryError =
   | { kind: "timeout" }
   | { kind: "token_rejected"; status: number }
   | { kind: "http_status"; status: number }
-  | { kind: "not_connected" };
+  | { kind: "not_connected" }
+  | { kind: "invalid_payload" };
 
 export interface DeliveryResult {
   scanId: string;
@@ -95,7 +118,15 @@ export type ConfigError =
   | { kind: "invalid_http_url" }
   | { kind: "invalid_ws_url" }
   | { kind: "invalid_http_token" }
-  | { kind: "invalid_ws_token" };
+  | { kind: "invalid_ws_token" }
+  | { kind: "invalid_http_header_name" }
+  | { kind: "invalid_ws_header_name" }
+  | { kind: "invalid_http_username" }
+  | { kind: "invalid_ws_username" }
+  | { kind: "invalid_http_query_param" }
+  | { kind: "invalid_ws_query_param" }
+  | { kind: "invalid_http_template"; error: TemplateError }
+  | { kind: "invalid_ws_template"; error: TemplateError };
 
 export type ImportError =
   | { kind: "invalid_json"; message: string }
@@ -105,6 +136,14 @@ export type ImportError =
   | { kind: "invalid_ws_url" }
   | { kind: "invalid_http_token" }
   | { kind: "invalid_ws_token" }
+  | { kind: "invalid_http_header_name" }
+  | { kind: "invalid_ws_header_name" }
+  | { kind: "invalid_http_username" }
+  | { kind: "invalid_ws_username" }
+  | { kind: "invalid_http_query_param" }
+  | { kind: "invalid_ws_query_param" }
+  | { kind: "invalid_http_template"; error: TemplateError }
+  | { kind: "invalid_ws_template"; error: TemplateError }
   | { kind: "invalid_link" };
 
 export type ImportSource = "file" | "link";
@@ -127,6 +166,12 @@ export interface ImportPreview {
   httpTokenToNewHost: boolean;
   /** https becomes http. */
   httpDowngrade: boolean;
+  httpAuth: AuthMode;
+  /** The whole HTTP auth setting differs from the current one. */
+  httpAuthChanged: boolean;
+  httpPayload: PayloadMode;
+  /** The whole HTTP payload setting differs from the current one. */
+  httpPayloadChanged: boolean;
   wsHostBefore: string | null;
   wsHostAfter: string | null;
   wsStream: boolean;
@@ -135,6 +180,12 @@ export interface ImportPreview {
   wsTokenToNewHost: boolean;
   /** wss becomes ws. */
   wsDowngrade: boolean;
+  wsAuth: AuthMode;
+  /** The whole WebSocket auth setting differs from the current one. */
+  wsAuthChanged: boolean;
+  wsPayload: PayloadMode;
+  /** The whole WebSocket payload setting differs from the current one. */
+  wsPayloadChanged: boolean;
 }
 
 export type ReaderStatus =

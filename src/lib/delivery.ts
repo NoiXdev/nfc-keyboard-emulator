@@ -1,3 +1,4 @@
+import type { TemplateError } from "./template";
 import type {
   ConfigError,
   DeliveryError,
@@ -48,12 +49,25 @@ export function deliveryErrorText(t: Translate, e: DeliveryError): string {
   }
 }
 
+/** Translated text for a template that cannot be applied, without a target prefix. */
+export function templateErrorText(t: Translate, e: TemplateError): string {
+  if (e.kind === "unknown_placeholder") {
+    return t("server.error.template_unknown_placeholder", { name: e.name });
+  }
+  return t(`server.error.template_${e.kind}`);
+}
+
 /** Translated text for a failed save or import; never the raw backend message. */
 export function serverErrorText(t: Translate, e: ConfigError | ImportError): string {
-  if (e.kind === "unsupported_version") {
-    return t("server.error.unsupported_version", { version: e.version });
+  switch (e.kind) {
+    case "unsupported_version":
+      return t("server.error.unsupported_version", { version: e.version });
+    case "invalid_http_template":
+    case "invalid_ws_template":
+      return t(`server.error.${e.kind}`, { error: templateErrorText(t, e.error) });
+    default:
+      return t(`server.error.${e.kind}`);
   }
-  return t(`server.error.${e.kind}`);
 }
 
 export type WsNotice = { kind: "reconnecting"; error: DeliveryError } | { kind: "token_rejected" };

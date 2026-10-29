@@ -4,6 +4,7 @@ import {
   deliveryErrorText,
   requestNotice,
   serverErrorText,
+  templateErrorText,
   withPendingDelivery,
   wsNotice,
   type LoggedScan,
@@ -78,6 +79,7 @@ describe("deliveryErrorText", () => {
     { kind: "token_rejected", status: 401 },
     { kind: "http_status", status: 503 },
     { kind: "not_connected" },
+    { kind: "invalid_payload" },
   ];
 
   it.each(kinds)("translates $kind without leaking key names", (e) => {
@@ -106,6 +108,15 @@ describe("serverErrorText", () => {
     { kind: "invalid_http_token" },
     { kind: "invalid_ws_token" },
     { kind: "invalid_link" },
+    { kind: "invalid_http_header_name" },
+    { kind: "invalid_ws_header_name" },
+    { kind: "invalid_http_username" },
+    { kind: "invalid_ws_username" },
+    { kind: "invalid_http_query_param" },
+    { kind: "invalid_ws_query_param" },
+    { kind: "invalid_http_template", error: { kind: "not_json" } },
+    { kind: "invalid_ws_template", error: { kind: "unknown_placeholder", name: "foo" } },
+    { kind: "invalid_http_template", error: { kind: "too_large" } },
   ];
 
   it.each(errors)("translates $kind without leaking key names", (e) => {
@@ -121,6 +132,92 @@ describe("serverErrorText", () => {
 
   it("interpolates the unsupported version", () => {
     expect(serverErrorText(t, { kind: "unsupported_version", version: 7 })).toContain("7");
+  });
+});
+
+describe("advanced server setting errors", () => {
+  const inLocale =
+    (locale: "de" | "en") =>
+    (key: string, named?: Record<string, unknown>): string =>
+      i18n.global.t(key, named ?? {}, { locale });
+  const cases: Array<[string, ConfigError | ImportError, string, string]> = [
+    [
+      "invalid_http_header_name",
+      { kind: "invalid_http_header_name" },
+      "HTTP: Ungültiger Header-Name",
+      "HTTP: Invalid header name",
+    ],
+    [
+      "invalid_ws_header_name",
+      { kind: "invalid_ws_header_name" },
+      "WebSocket: Ungültiger Header-Name",
+      "WebSocket: Invalid header name",
+    ],
+    [
+      "invalid_http_username",
+      { kind: "invalid_http_username" },
+      "HTTP: Benutzername darf keinen Doppelpunkt enthalten",
+      "HTTP: Username must not contain a colon",
+    ],
+    [
+      "invalid_ws_username",
+      { kind: "invalid_ws_username" },
+      "WebSocket: Benutzername darf keinen Doppelpunkt enthalten",
+      "WebSocket: Username must not contain a colon",
+    ],
+    [
+      "invalid_http_query_param",
+      { kind: "invalid_http_query_param" },
+      "HTTP: Ungültiger Parametername",
+      "HTTP: Invalid parameter name",
+    ],
+    [
+      "invalid_ws_query_param",
+      { kind: "invalid_ws_query_param" },
+      "WebSocket: Ungültiger Parametername",
+      "WebSocket: Invalid parameter name",
+    ],
+    [
+      "invalid_http_template not_json",
+      { kind: "invalid_http_template", error: { kind: "not_json" } },
+      "HTTP: Vorlage ist kein gültiges JSON",
+      "HTTP: Template is not valid JSON",
+    ],
+    [
+      "invalid_ws_template unknown_placeholder",
+      { kind: "invalid_ws_template", error: { kind: "unknown_placeholder", name: "foo" } },
+      "WebSocket: Unbekannter Platzhalter: foo",
+      "WebSocket: Unknown placeholder: foo",
+    ],
+    [
+      "invalid_http_template too_large",
+      { kind: "invalid_http_template", error: { kind: "too_large" } },
+      "HTTP: Vorlage ist größer als 8 KB",
+      "HTTP: Template is larger than 8 KB",
+    ],
+  ];
+
+  it.each(cases)("%s", (_name, error, deText, enText) => {
+    expect(serverErrorText(inLocale("de"), error)).toBe(deText);
+    expect(serverErrorText(inLocale("en"), error)).toBe(enText);
+  });
+
+  it("translates the template error alone, without prefix", () => {
+    expect(templateErrorText(inLocale("de"), { kind: "unknown_placeholder", name: "x" })).toBe(
+      "Unbekannter Platzhalter: x",
+    );
+    expect(templateErrorText(inLocale("en"), { kind: "too_large" })).toBe(
+      "Template is larger than 8 KB",
+    );
+  });
+
+  it("translates invalid_payload", () => {
+    expect(deliveryErrorText(inLocale("de"), { kind: "invalid_payload" })).toBe(
+      "Vorlage konnte nicht angewendet werden",
+    );
+    expect(deliveryErrorText(inLocale("en"), { kind: "invalid_payload" })).toBe(
+      "Template could not be applied",
+    );
   });
 });
 

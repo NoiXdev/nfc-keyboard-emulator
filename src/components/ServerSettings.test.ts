@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils";
 import { flushPromises } from "@vue/test-utils";
 import ServerSettings from "./ServerSettings.vue";
 import { i18n } from "../i18n";
+import { defaultAuth, defaultPayload } from "../lib/template";
 import { api, type ConfigError, type IntegrationConfig, type WsStatus } from "../lib/tauri";
 
 vi.mock("../lib/tauri", () => ({ api: { testHttp: vi.fn(), testWs: vi.fn() } }));
@@ -11,8 +12,21 @@ const t = i18n.global.t;
 
 const integration: IntegrationConfig = {
   deviceName: "Reception",
-  http: { enabled: true, url: "https://example.com/api", token: "http-secret" },
-  ws: { url: "wss://example.com/ws", token: "ws-secret", stream: true, request: false },
+  http: {
+    enabled: true,
+    url: "https://example.com/api",
+    token: "http-secret",
+    auth: defaultAuth(),
+    payload: defaultPayload(),
+  },
+  ws: {
+    url: "wss://example.com/ws",
+    token: "ws-secret",
+    stream: true,
+    request: false,
+    auth: defaultAuth(),
+    payload: defaultPayload(),
+  },
 };
 
 function render(

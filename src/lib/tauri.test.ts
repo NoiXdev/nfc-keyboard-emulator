@@ -18,6 +18,10 @@ const preview: ImportPreview = {
   httpToken: "set",
   httpTokenToNewHost: false,
   httpDowngrade: false,
+  httpAuth: "bearer",
+  httpAuthChanged: false,
+  httpPayload: "standard",
+  httpPayloadChanged: false,
   wsHostBefore: null,
   wsHostAfter: null,
   wsStream: false,
@@ -25,6 +29,10 @@ const preview: ImportPreview = {
   wsToken: "unchanged",
   wsTokenToNewHost: false,
   wsDowngrade: false,
+  wsAuth: "bearer",
+  wsAuthChanged: false,
+  wsPayload: "standard",
+  wsPayloadChanged: false,
 };
 
 describe("onImportPreview", () => {
