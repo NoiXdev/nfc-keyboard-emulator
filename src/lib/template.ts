@@ -159,6 +159,12 @@ function fill(value: unknown, payload: ScanPayload): unknown {
  * Substitutes the scan into every string value of the template; keys are never touched. A
  * string that is exactly one placeholder takes the placeholder's own type, so `"{{uidLength}}"`
  * becomes a number. Checks size (UTF-8 bytes), JSON syntax, then placeholder names.
+ *
+ * This is a preview, not the wire format: the backend serialises the result itself, so the
+ * sent payload may differ in detail. JS orders integer-like keys (`"2"`, `"10"`) before the
+ * others, numbers lose their notation (`1.0` becomes `1`, `1e2` becomes `100`), and
+ * `JSON.parse` accepts a few inputs the backend's parser rejects (a lone surrogate escape, an
+ * out-of-range number). The backend decides whether a template is valid.
  */
 export function renderTemplate(template: string, payload: ScanPayload): RenderResult {
   if (new TextEncoder().encode(template).length > MAX_TEMPLATE_BYTES) {

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyDelivery,
   deliveryErrorText,
+  httpPushActive,
   requestNotice,
   serverErrorText,
   templateErrorText,
@@ -80,6 +81,9 @@ describe("deliveryErrorText", () => {
     { kind: "http_status", status: 503 },
     { kind: "not_connected" },
     { kind: "invalid_payload" },
+    { kind: "invalid_auth", field: "header_name" },
+    { kind: "invalid_auth", field: "username" },
+    { kind: "invalid_auth", field: "query_param" },
   ];
 
   it.each(kinds)("translates $kind without leaking key names", (e) => {
@@ -144,26 +148,26 @@ describe("advanced server setting errors", () => {
     [
       "invalid_http_header_name",
       { kind: "invalid_http_header_name" },
-      "HTTP: Ungültiger Header-Name",
-      "HTTP: Invalid header name",
+      "HTTP: Ungültiger oder reservierter Header-Name (z. B. Host)",
+      "HTTP: Invalid or reserved header name (e.g. Host)",
     ],
     [
       "invalid_ws_header_name",
       { kind: "invalid_ws_header_name" },
-      "WebSocket: Ungültiger Header-Name",
-      "WebSocket: Invalid header name",
+      "WebSocket: Ungültiger oder reservierter Header-Name (z. B. Host)",
+      "WebSocket: Invalid or reserved header name (e.g. Host)",
     ],
     [
       "invalid_http_username",
       { kind: "invalid_http_username" },
-      "HTTP: Benutzername darf keinen Doppelpunkt enthalten",
-      "HTTP: Username must not contain a colon",
+      "Der HTTP-Benutzername darf nur sichtbare ASCII-Zeichen enthalten, ohne Leerzeichen oder Doppelpunkt.",
+      "The HTTP username may only contain visible ASCII characters, without spaces or colons.",
     ],
     [
       "invalid_ws_username",
       { kind: "invalid_ws_username" },
-      "WebSocket: Benutzername darf keinen Doppelpunkt enthalten",
-      "WebSocket: Username must not contain a colon",
+      "Der WebSocket-Benutzername darf nur sichtbare ASCII-Zeichen enthalten, ohne Leerzeichen oder Doppelpunkt.",
+      "The WebSocket username may only contain visible ASCII characters, without spaces or colons.",
     ],
     [
       "invalid_http_query_param",
@@ -211,6 +215,24 @@ describe("advanced server setting errors", () => {
     );
   });
 
+  it.each([
+    [
+      "header_name",
+      "Ungültiger oder reservierter Header-Name (z. B. Host)",
+      "Invalid or reserved header name (e.g. Host)",
+    ],
+    [
+      "username",
+      "Der Benutzername darf nur sichtbare ASCII-Zeichen enthalten, ohne Leerzeichen oder Doppelpunkt.",
+      "The username may only contain visible ASCII characters, without spaces or colons.",
+    ],
+    ["query_param", "Ungültiger Parametername", "Invalid parameter name"],
+  ] as const)("translates invalid_auth %s without a target prefix", (field, deText, enText) => {
+    const error: DeliveryError = { kind: "invalid_auth", field };
+    expect(deliveryErrorText(inLocale("de"), error)).toBe(deText);
+    expect(deliveryErrorText(inLocale("en"), error)).toBe(enText);
+  });
+
   it("translates invalid_payload", () => {
     expect(deliveryErrorText(inLocale("de"), { kind: "invalid_payload" })).toBe(
       "Vorlage konnte nicht angewendet werden",
@@ -218,6 +240,16 @@ describe("advanced server setting errors", () => {
     expect(deliveryErrorText(inLocale("en"), { kind: "invalid_payload" })).toBe(
       "Template could not be applied",
     );
+  });
+});
+
+describe("httpPushActive", () => {
+  it("needs both the switch and an address", () => {
+    expect(httpPushActive({ enabled: true, url: "https://x.test/hook" })).toBe(true);
+    expect(httpPushActive({ enabled: true, url: "" })).toBe(false);
+    expect(httpPushActive({ enabled: true, url: "   " })).toBe(false);
+    expect(httpPushActive({ enabled: false, url: "https://x.test/hook" })).toBe(false);
+    expect(httpPushActive(undefined)).toBe(false);
   });
 });
 

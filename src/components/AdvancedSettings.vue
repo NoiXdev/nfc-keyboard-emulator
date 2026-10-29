@@ -174,6 +174,9 @@ const errorText = computed(() =>
           </div>
           <pre v-else :data-test="id('preview')">{{ previewText }}</pre>
         </div>
+        <p class="muted note" :data-test="id('preview-note')">
+          {{ t("server.advanced.previewNote") }}
+        </p>
         <p class="muted note" :data-test="id('test-note')">{{ t("server.advanced.testNote") }}</p>
         <p v-if="target === 'ws'" class="muted note" :data-test="id('request-note')">
           {{ t("server.advanced.requestNote") }}

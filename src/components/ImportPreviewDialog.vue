@@ -13,7 +13,8 @@ const tokenText = (c: TokenChange) =>
   t({ unchanged: "import.tokenUnchanged", set: "import.tokenSet", cleared: "import.tokenCleared" }[c]);
 const hostText = (host: string | null) => host ?? t("import.noHost");
 
-// A link can point the stored token at another server; say so before anything is applied.
+// A link can point the stored token at another server or into the URL; say so before
+// anything is applied.
 const warnings = computed(() => {
   const p = props.preview;
   const targets = [
@@ -21,17 +22,20 @@ const warnings = computed(() => {
       name: t("import.targetHttp"),
       host: p.httpHostAfter,
       toNewHost: p.httpTokenToNewHost,
+      toQuery: p.httpTokenToQuery,
       downgrade: p.httpDowngrade,
     },
     {
       name: t("import.targetWs"),
       host: p.wsHostAfter,
       toNewHost: p.wsTokenToNewHost,
+      toQuery: p.wsTokenToQuery,
       downgrade: p.wsDowngrade,
     },
   ];
-  return targets.flatMap(({ name, host, toNewHost, downgrade }) => [
+  return targets.flatMap(({ name, host, toNewHost, toQuery, downgrade }) => [
     ...(toNewHost ? [t("import.warnTokenToNewHost", { target: name, host })] : []),
+    ...(toQuery ? [t("import.warnTokenToQuery", { target: name })] : []),
     ...(downgrade ? [t("import.warnDowngrade", { target: name })] : []),
   ]);
 });

@@ -15,6 +15,7 @@ const preview: ImportPreview = {
   httpHostAfter: "https://api.example.com:8443",
   httpToken: "set",
   httpTokenToNewHost: false,
+  httpTokenToQuery: false,
   httpDowngrade: false,
   httpAuth: "bearer",
   httpAuthChanged: false,
@@ -26,6 +27,7 @@ const preview: ImportPreview = {
   wsRequest: false,
   wsToken: "unchanged",
   wsTokenToNewHost: false,
+  wsTokenToQuery: false,
   wsDowngrade: false,
   wsAuth: "bearer",
   wsAuthChanged: false,
@@ -92,6 +94,17 @@ describe("ImportPreviewDialog", () => {
     });
     expect(w.get('[data-test="warnings"]').text()).toContain(
       t("import.warnTokenToNewHost", { target: t("import.targetWs"), host: "wss://evil.example" }),
+    );
+  });
+
+  it("warns about a token moving into the URL query without naming a host", () => {
+    const w = render({ ...preview, httpTokenToQuery: true });
+    const text = w.get('[data-test="warnings"]').text();
+    expect(text).toContain(t("import.warnTokenToQuery", { target: t("import.targetHttp") }));
+    expect(w.findAll('[data-test="warnings"] li')).toHaveLength(1);
+    const ws = render({ ...preview, wsTokenToQuery: true });
+    expect(ws.get('[data-test="warnings"]').text()).toContain(
+      t("import.warnTokenToQuery", { target: t("import.targetWs") }),
     );
   });
 

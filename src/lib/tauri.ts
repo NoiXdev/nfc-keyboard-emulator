@@ -95,7 +95,8 @@ export type DeliveryError =
   | { kind: "token_rejected"; status: number }
   | { kind: "http_status"; status: number }
   | { kind: "not_connected" }
-  | { kind: "invalid_payload" };
+  | { kind: "invalid_payload" }
+  | { kind: "invalid_auth"; field: "header_name" | "username" | "query_param" };
 
 export interface DeliveryResult {
   scanId: string;
@@ -164,6 +165,8 @@ export interface ImportPreview {
   httpToken: TokenChange;
   /** The stored token is kept but goes to another scheme or host. */
   httpTokenToNewHost: boolean;
+  /** The stored token is kept but its mode switches to the URL query. */
+  httpTokenToQuery: boolean;
   /** https becomes http. */
   httpDowngrade: boolean;
   httpAuth: AuthMode;
@@ -178,6 +181,8 @@ export interface ImportPreview {
   wsRequest: boolean;
   wsToken: TokenChange;
   wsTokenToNewHost: boolean;
+  /** The stored token is kept but its mode switches to the URL query. */
+  wsTokenToQuery: boolean;
   /** wss becomes ws. */
   wsDowngrade: boolean;
   wsAuth: AuthMode;

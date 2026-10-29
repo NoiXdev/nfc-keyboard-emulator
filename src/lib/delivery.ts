@@ -4,6 +4,7 @@ import type {
   DeliveryError,
   DeliveryResult,
   DeliveryTarget,
+  HttpTarget,
   ImportError,
   ScanRecord,
   WsStatus,
@@ -44,6 +45,8 @@ export function deliveryErrorText(t: Translate, e: DeliveryError): string {
     case "token_rejected":
     case "http_status":
       return t(`delivery.error.${e.kind}`, { status: e.status });
+    case "invalid_auth":
+      return t(`delivery.error.invalid_auth_${e.field}`);
     default:
       return t(`delivery.error.${e.kind}`);
   }
@@ -68,6 +71,11 @@ export function serverErrorText(t: Translate, e: ConfigError | ImportError): str
     default:
       return t(`server.error.${e.kind}`);
   }
+}
+
+/** HTTP push only sends when it is on and has an address; the footer must say the same. */
+export function httpPushActive(http: Pick<HttpTarget, "enabled" | "url"> | undefined): boolean {
+  return !!http && http.enabled && http.url.trim() !== "";
 }
 
 export type WsNotice = { kind: "reconnecting"; error: DeliveryError } | { kind: "token_rejected" };

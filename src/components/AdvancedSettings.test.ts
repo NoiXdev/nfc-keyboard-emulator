@@ -159,6 +159,17 @@ describe("AdvancedSettings", () => {
     expect(text("http-template-error")).toBe(t("server.error.template_not_json"));
   });
 
+  it("labels the preview as example values and explains the device fallback", () => {
+    mountIt({ payload: { mode: "template", template: "{}" } });
+    expect(text("http-preview-note")).toBe(t("server.advanced.previewNote"));
+    expect(t("server.advanced.previewNote", {}, { locale: "de" })).toBe(
+      "Beispielwerte; als Gerät wird der Rechnername gesendet, wenn das Feld leer ist.",
+    );
+    expect(t("server.advanced.previewNote", {}, { locale: "en" })).toBe(
+      "Example values; if the device name is empty, the computer name is sent as the device.",
+    );
+  });
+
   it("notes that the test sends an example scan", () => {
     mountIt({ payload: { mode: "template", template: "{}" } });
     expect(text("http-test-note")).toBe(t("server.advanced.testNote"));

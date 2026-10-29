@@ -51,7 +51,8 @@ function save() {
   emit("save", clone(local));
 }
 
-// What the example payload shows as the device when the name is left empty.
+// What the example payload shows as the device when the name is left empty; the wire uses the
+// host name then, which is why the preview is labelled as example values.
 const previewDevice = computed(() => local.deviceName.trim() || "PC");
 
 function revealText(mode: AuthMode, shown: boolean): string {

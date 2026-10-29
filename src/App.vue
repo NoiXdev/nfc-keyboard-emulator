@@ -26,6 +26,7 @@ import { pushScan } from "./lib/scanLog";
 import {
   applyDelivery,
   deliveryErrorText,
+  httpPushActive,
   requestNotice,
   serverErrorText,
   withPendingDelivery,
@@ -381,7 +382,7 @@ function changeLanguage(v: string) {
         :status="status"
         :typing="typing"
         :ws="ws"
-        :http-enabled="config?.integration.http.enabled ?? false"
+        :http-enabled="httpPushActive(config?.integration.http)"
       />
     </div>
 
