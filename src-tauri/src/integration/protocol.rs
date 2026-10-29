@@ -5,7 +5,7 @@ use crate::scan::{DeliveryTarget, ScanRecord};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanPayload {
     pub scan_id: String,

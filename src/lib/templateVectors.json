@@ -1,0 +1,277 @@
+[
+  {
+    "name": "all placeholders",
+    "template": "{\"uid\": \"{{uid}}\", \"uidFormatted\": \"{{uidFormatted}}\", \"len\": \"{{uidLength}}\", \"id\": \"{{scanId}}\", \"device\": \"{{device}}\", \"reader\": \"{{reader}}\", \"at\": \"{{timestamp}}\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "len": 7,
+      "id": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "at": "2026-10-29T10:15:30.123Z"
+    }
+  },
+  {
+    "name": "embedded",
+    "template": "{\"text\": \"Card {{uid}} at {{ device }}\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "text": "Card 04A1B2C3D4E5F6 at Kasse 1"
+    }
+  },
+  {
+    "name": "whitespace in whole-value placeholder",
+    "template": "{\"len\": \"{{ uidLength }}\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "len": 7
+    }
+  },
+  {
+    "name": "escaping",
+    "template": "{\"r\": \"{{reader}}\", \"d\": \"{{device}}\", \"e\": \"{{reader}}!\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse Süd",
+      "reader": "ACS \"ACR122U\" \\ Reader\n",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "r": "ACS \"ACR122U\" \\ Reader\n",
+      "d": "Kasse Süd",
+      "e": "ACS \"ACR122U\" \\ Reader\n!"
+    }
+  },
+  {
+    "name": "uidLength embedded",
+    "template": "{\"x\": \"n={{uidLength}}\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "x": "n=7"
+    }
+  },
+  {
+    "name": "keys untouched",
+    "template": "{\"{{uid}}\": 1}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "{{uid}}": 1
+    }
+  },
+  {
+    "name": "nested arrays",
+    "template": "{\"list\": [\"{{uid}}\", [\"{{device}}\", 1, null], {\"deep\": [{\"n\": \"{{uidLength}}\"}]}], \"flag\": true}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "list": [
+        "04A1B2C3D4E5F6",
+        [
+          "Kasse 1",
+          1,
+          null
+        ],
+        {
+          "deep": [
+            {
+              "n": 7
+            }
+          ]
+        }
+      ],
+      "flag": true
+    }
+  },
+  {
+    "name": "key order",
+    "template": "{\"z\": 1, \"a\": \"{{uid}}\", \"m\": {\"y\": 2, \"b\": \"{{device}}\"}}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "z": 1,
+      "a": "04A1B2C3D4E5F6",
+      "m": {
+        "y": 2,
+        "b": "Kasse 1"
+      }
+    }
+  },
+  {
+    "name": "non-string values untouched",
+    "template": "{\"n\": 1.5, \"b\": false, \"z\": null}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "n": 1.5,
+      "b": false,
+      "z": null
+    }
+  },
+  {
+    "name": "not a placeholder",
+    "template": "{\"a\": \"{{}}\", \"b\": \"{ {uid} }\", \"c\": \"{{ }}\", \"d\": \"{{uid\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "a": "{{}}",
+      "b": "{ {uid} }",
+      "c": "{{ }}",
+      "d": "{{uid"
+    }
+  },
+  {
+    "name": "triple braces",
+    "template": "{\"a\": \"{{{uid}}}\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "expected": {
+      "a": "{04A1B2C3D4E5F6}"
+    }
+  },
+  {
+    "name": "not json",
+    "template": "{\"a\": }",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "error": {
+      "kind": "not_json"
+    }
+  },
+  {
+    "name": "unknown placeholder",
+    "template": "{\"a\": \"{{foo}}\", \"b\": \"{{bar}}\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "error": {
+      "kind": "unknown_placeholder",
+      "name": "foo"
+    }
+  },
+  {
+    "name": "unknown placeholder is case sensitive",
+    "template": "{\"a\": \"{{UID}}\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "error": {
+      "kind": "unknown_placeholder",
+      "name": "UID"
+    }
+  },
+  {
+    "name": "too large",
+    "template": "{\"a\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "payload": {
+      "scanId": "scan-1",
+      "device": "Kasse 1",
+      "reader": "ACME Reader 0",
+      "uid": "04A1B2C3D4E5F6",
+      "uidFormatted": "04:A1:B2:C3:D4:E5:F6",
+      "uidLength": 7,
+      "timestamp": "2026-10-29T10:15:30.123Z"
+    },
+    "error": {
+      "kind": "too_large"
+    }
+  }
+]
