@@ -1,5 +1,5 @@
-//! Local WebSocket server for the `ws` tests: records the `Authorization` header, can reject
-//! the handshake with a status code and hands every accepted connection to the test.
+//! Local WebSocket server for the `ws` tests: records the upgrade request's headers and URI,
+//! can reject the handshake with a status code and hands every accepted connection to the test.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
-use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
+use tokio_tungstenite::tungstenite::http::header::{HeaderMap, AUTHORIZATION};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_hdr_async, WebSocketStream};
@@ -26,6 +26,9 @@ pub struct TestServer {
 
 pub struct Conn {
     pub auth: Option<String>,
+    pub headers: HeaderMap,
+    /// Path and query of the upgrade request.
+    pub uri: String,
     ws: WebSocketStream<TcpStream>,
 }
 
@@ -44,6 +47,8 @@ impl TestServer {
                 let tx = tx.clone();
                 tokio::spawn(async move {
                     let mut auth = None;
+                    let mut headers = HeaderMap::new();
+                    let mut uri = String::new();
                     // The error type is fixed by tungstenite's `Callback`.
                     #[allow(clippy::result_large_err)]
                     let callback = |req: &Request, resp: Response| {
@@ -51,6 +56,8 @@ impl TestServer {
                             .headers()
                             .get(AUTHORIZATION)
                             .map(|v| v.to_str().unwrap().to_string());
+                        headers = req.headers().clone();
+                        uri = req.uri().to_string();
                         match reject {
                             Some(code) => {
                                 let mut err = ErrorResponse::new(None);
@@ -61,7 +68,12 @@ impl TestServer {
                         }
                     };
                     if let Ok(ws) = accept_hdr_async(sock, callback).await {
-                        let _ = tx.send(Conn { auth, ws });
+                        let _ = tx.send(Conn {
+                            auth,
+                            headers,
+                            uri,
+                            ws,
+                        });
                     }
                 });
             }

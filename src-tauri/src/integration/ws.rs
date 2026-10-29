@@ -3,23 +3,26 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
+use serde_json::Value;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{interval_at, timeout, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::header::{HeaderValue, AUTHORIZATION};
+use tokio_tungstenite::tungstenite::http::header::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
+use super::auth::{credential, with_query};
 use super::backoff::Backoff;
 use super::config::WsTarget;
 use super::http::{install_crypto_provider, origin_of};
 use super::protocol::{
-    parse_server_message, scan_payload, ClientMessage, DeliveryError, DeliveryResult, EndReason,
-    Modes, ScanPayload, ServerMessage, PROTOCOL_VERSION,
+    parse_server_message, scan_body, scan_payload, ClientMessage, DeliveryError, DeliveryResult,
+    EndReason, Modes, ScanPayload, ServerMessage, PROTOCOL_VERSION,
 };
 use super::requests::RequestSlot;
+use super::template::{example_payload, render_template, PayloadMode};
 use crate::scan::{DeliveryTarget, ScanRecord};
 
 /// Upper bound for TCP connect, TLS and the WebSocket handshake together.
@@ -143,15 +146,27 @@ pub fn spawn_ws(
     handle
 }
 
-/// Connects, sends `hello` and closes again; reports whether the handshake succeeded.
+/// Connects, sends `hello` and closes again; reports whether the handshake succeeded. With a
+/// template, the template rendered with an example scan follows the `hello`, so the receiver
+/// sees the shape it will get.
 pub async fn test_ws(
     target: &WsTarget,
     device: &str,
     app_version: &str,
 ) -> Result<(), DeliveryError> {
+    let example = match target.payload.mode {
+        PayloadMode::Standard => None,
+        PayloadMode::Template => Some(
+            render_template(&target.payload.template, &example_payload(device))
+                .map_err(|_| DeliveryError::InvalidPayload)?,
+        ),
+    };
     let (mut ws, origin) = connect(target.clone()).await?;
     let hello = hello_message(target, device, app_version);
     send(&mut ws, &hello, &origin).await?;
+    if let Some(example) = &example {
+        send(&mut ws, example, &origin).await?;
+    }
     close(&mut ws).await;
     Ok(())
 }
@@ -521,19 +536,27 @@ impl Connection {
         if messages.is_empty() {
             return Ok(());
         }
-        // One delivery result per scan; a failed write ends the session, so stop there.
+        // One delivery result per scan; a failed write ends the session, so stop there. A
+        // template that cannot be rendered fails the delivery but keeps the session.
         let mut result = Ok(());
+        let mut payload_error = None;
         for msg in &messages {
-            result = send(ws, msg, origin).await;
-            if result.is_err() {
-                break;
+            match msg {
+                Ok(msg) => {
+                    result = send(ws, msg, origin).await;
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                Err(error) => payload_error = Some(error.clone()),
             }
         }
+        let error = result.clone().err().or(payload_error);
         self.events.delivery(&DeliveryResult {
             scan_id,
             target: DeliveryTarget::Ws,
-            ok: result.is_ok(),
-            error: result.clone().err(),
+            ok: error.is_none(),
+            error,
         });
         if answers_request {
             // The worker has taken the request from the slot.
@@ -542,21 +565,23 @@ impl Connection {
         result
     }
 
-    /// `scan_response` for an answered request, plus `scan` whenever streaming is on.
-    fn scan_messages(&self, scan: OutgoingScan) -> Vec<ClientMessage> {
+    /// `scan_response` for an answered request, plus the stream frame whenever streaming is
+    /// on. Only the stream frame follows the payload template; one that cannot be rendered is
+    /// an `Err`.
+    fn scan_messages(&self, scan: OutgoingScan) -> Vec<Result<Value, DeliveryError>> {
         let mut messages = Vec::new();
         if let Some(request_id) = scan.request_id {
-            messages.push(ClientMessage::ScanResponse {
+            let response = ClientMessage::ScanResponse {
                 protocol_version: PROTOCOL_VERSION,
                 request_id,
                 payload: scan.payload.clone(),
-            });
+            };
+            messages.push(Ok(
+                serde_json::to_value(response).expect("client messages always serialize")
+            ));
         }
         if self.settings.target.stream {
-            messages.push(ClientMessage::Scan {
-                protocol_version: PROTOCOL_VERSION,
-                payload: scan.payload,
-            });
+            messages.push(scan_body(&self.settings.target.payload, scan.payload));
         }
         messages
     }
@@ -576,7 +601,9 @@ impl Connection {
     fn apply(&mut self, new: WsSettings) -> Change {
         let old = &self.settings;
         let change = Change {
-            endpoint: old.target.url != new.target.url || old.target.token != new.target.token,
+            endpoint: old.target.url != new.target.url
+                || old.target.token != new.target.token
+                || old.target.auth != new.target.auth,
             device: old.device != new.device,
             modes: old.target.stream != new.target.stream
                 || old.target.request != new.target.request,
@@ -631,20 +658,20 @@ async fn connect(target: WsTarget) -> Result<(WsStream, String), DeliveryError> 
         _ => return Err(DeliveryError::InvalidUrl),
     };
     let origin = origin_of(&url);
-    let mut request = target
-        .url
+    let cred = credential(&target.auth, &target.token);
+    let mut request = with_query(&url, &cred)
         .as_str()
         .into_client_request()
         .map_err(|_| DeliveryError::InvalidUrl)?;
-    if !target.token.is_empty() {
-        let mut value =
-            HeaderValue::from_str(&format!("Bearer {}", target.token)).map_err(|_| {
-                DeliveryError::Unreachable {
-                    message: format!("invalid token characters ({origin})"),
-                }
-            })?;
+    if let Some((name, value)) = &cred.header {
+        let invalid = || DeliveryError::Unreachable {
+            message: format!("invalid credentials ({origin})"),
+        };
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| invalid())?;
+        let mut value = HeaderValue::from_str(value).map_err(|_| invalid())?;
+        // A sensitive value is never debug-printed.
         value.set_sensitive(true);
-        request.headers_mut().insert(AUTHORIZATION, value);
+        request.headers_mut().insert(name, value);
     }
     install_crypto_provider();
     match timeout(CONNECT_TIMEOUT, connect_async(request)).await {
@@ -654,7 +681,7 @@ async fn connect(target: WsTarget) -> Result<(WsStream, String), DeliveryError> 
     }
 }
 
-async fn send(ws: &mut WsStream, msg: &ClientMessage, origin: &str) -> Result<(), DeliveryError> {
+async fn send(ws: &mut WsStream, msg: &impl Serialize, origin: &str) -> Result<(), DeliveryError> {
     let json = serde_json::to_string(msg).expect("client messages always serialize");
     send_frame(ws, Message::text(json), origin).await
 }
@@ -727,6 +754,8 @@ fn jitter() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::integration::auth::{AuthConfig, AuthMode};
+    use crate::integration::template::{PayloadConfig, PayloadMode};
     use crate::integration::test_server::TestServer;
     use crate::scan::{DeliveryTarget, ScanRecord, ScanStatus};
     use std::time::Instant as StdInstant;
@@ -1344,6 +1373,215 @@ mod tests {
                 format!("connection refused ({scheme}://127.0.0.1:{port})")
             );
         }
+    }
+
+    fn with_auth(mut t: WsTarget, mode: AuthMode) -> WsTarget {
+        t.auth = AuthConfig {
+            mode,
+            username: "user".into(),
+            ..AuthConfig::default()
+        };
+        t
+    }
+
+    fn with_template(mut t: WsTarget, text: &str) -> WsTarget {
+        t.payload = PayloadConfig {
+            mode: PayloadMode::Template,
+            template: text.into(),
+        };
+        t
+    }
+
+    fn header(conn: &crate::integration::test_server::Conn, name: &str) -> Option<String> {
+        conn.headers
+            .get(name)
+            .map(|v| v.to_str().unwrap().to_string())
+    }
+
+    const TEMPLATE: &str = r#"{"card":"{{uid}}","len":"{{uidLength}}","from":"{{device}}"}"#;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn custom_header_on_upgrade() {
+        let mut server = TestServer::start(None).await;
+        let t = with_auth(target(&server.url, "secret", true, false), AuthMode::Header);
+        let _c = start(t);
+        let conn = server.accept().await;
+        assert_eq!(header(&conn, "x-api-key").as_deref(), Some("secret"));
+        assert_eq!(conn.auth, None);
+        assert_eq!(conn.uri, "/ws");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn basic_on_upgrade() {
+        let mut server = TestServer::start(None).await;
+        let t = with_auth(target(&server.url, "pass", true, false), AuthMode::Basic);
+        let _c = start(t);
+        let conn = server.accept().await;
+        assert_eq!(conn.auth.as_deref(), Some("Basic dXNlcjpwYXNz"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn query_token_on_upgrade_url() {
+        let mut server = TestServer::start(None).await;
+        let url = format!("{}?site=1", server.url);
+        let t = with_auth(target(&url, "secret", true, false), AuthMode::Query);
+        let _c = start(t);
+        let conn = server.accept().await;
+        assert_eq!(conn.uri, "/ws?site=1&token=secret");
+        assert_eq!(conn.auth, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_scan_uses_template() {
+        let mut server = TestServer::start(None).await;
+        let c = start(with_template(
+            target(&server.url, "t", true, false),
+            TEMPLATE,
+        ));
+        let mut conn = server.accept().await;
+        // `hello` stays standard.
+        assert_eq!(conn.recv().await["type"], "hello");
+        wait_connected(&c).await;
+
+        c.handle.send_scan(&record(None), "Reception");
+        assert_eq!(
+            conn.recv().await,
+            serde_json::json!({"card": "04A2B3C4D5E6F7", "len": 7, "from": "Reception"})
+        );
+        wait_until("delivery", Duration::from_secs(3), || {
+            !c.events.deliveries.lock().unwrap().is_empty()
+        })
+        .await;
+        assert!(c.events.deliveries.lock().unwrap()[0].ok);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn request_answer_stays_standard_with_template() {
+        let mut server = TestServer::start(None).await;
+        let c = start(with_template(
+            target(&server.url, "t", true, true),
+            TEMPLATE,
+        ));
+        let mut conn = server.accept().await;
+        conn.recv().await; // hello
+        conn.send_text(r#"{"type":"scan_request","requestId":"abc"}"#)
+            .await;
+        wait_until("armed", Duration::from_secs(3), || c.slot.is_armed()).await;
+
+        let id = c.slot.take_for_scan(StdInstant::now());
+        c.handle.send_scan(&record(id.as_deref()), "Reception");
+        let response = conn.recv().await;
+        assert_eq!(response["type"], "scan_response");
+        assert_eq!(response["requestId"], "abc");
+        assert_eq!(response["uid"], "04A2B3C4D5E6F7");
+        assert_eq!(conn.recv().await["card"], "04A2B3C4D5E6F7");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn auth_change_reconnects() {
+        let mut server = TestServer::start(None).await;
+        let c = start(target(&server.url, "secret", true, false));
+        let first = server.accept().await;
+        assert_eq!(first.auth.as_deref(), Some("Bearer secret"));
+        wait_connected(&c).await;
+
+        let t = with_auth(target(&server.url, "secret", true, false), AuthMode::Header);
+        c.handle.update(settings(t));
+        let second = server.accept().await;
+        assert_eq!(header(&second, "x-api-key").as_deref(), Some("secret"));
+        assert_eq!(second.auth, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn payload_change_does_not_reconnect() {
+        let mut server = TestServer::start(None).await;
+        let c = start(target(&server.url, "t", true, false));
+        let mut conn = server.accept().await;
+        conn.recv().await; // hello
+        wait_connected(&c).await;
+
+        c.handle.update(settings(with_template(
+            target(&server.url, "t", true, false),
+            TEMPLATE,
+        )));
+        // Neither a new connection nor a repeated `hello`.
+        conn.expect_silence(Duration::from_millis(500)).await;
+        assert_eq!(server.attempts(), 1);
+
+        c.handle.send_scan(&record(None), "Reception");
+        assert_eq!(conn.recv().await["card"], "04A2B3C4D5E6F7");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn invalid_template_reports_invalid_payload_and_stays_connected() {
+        let mut server = TestServer::start(None).await;
+        let c = start(with_template(
+            target(&server.url, "t", true, true),
+            "not json",
+        ));
+        let mut conn = server.accept().await;
+        conn.recv().await; // hello
+        conn.send_text(r#"{"type":"scan_request","requestId":"abc"}"#)
+            .await;
+        wait_until("armed", Duration::from_secs(3), || c.slot.is_armed()).await;
+
+        let id = c.slot.take_for_scan(StdInstant::now());
+        c.handle.send_scan(&record(id.as_deref()), "Reception");
+        // The answer still goes out, the stream frame does not.
+        assert_eq!(conn.recv().await["type"], "scan_response");
+        conn.expect_silence(Duration::from_millis(500)).await;
+        let deliveries = c.events.deliveries.lock().unwrap().clone();
+        assert_eq!(deliveries.len(), 1);
+        assert!(!deliveries[0].ok);
+        assert_eq!(deliveries[0].error, Some(DeliveryError::InvalidPayload));
+
+        assert_eq!(state(&c), WsState::Connected);
+        assert_eq!(server.attempts(), 1);
+        conn.send_text(r#"{"type":"scan_request","requestId":"next"}"#)
+            .await;
+        wait_until("armed again", Duration::from_secs(3), || {
+            c.events.armed.lock().unwrap().len() == 2
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn query_token_not_in_error_when_rejected() {
+        let server = TestServer::start(Some(401)).await;
+        let url = format!("{}?key=urlsecret", server.url);
+        let c = start(with_auth(
+            target(&url, "tok-123", true, false),
+            AuthMode::Query,
+        ));
+        wait_until("token rejected", Duration::from_secs(3), || {
+            state(&c) == WsState::TokenRejected
+        })
+        .await;
+        let json = serde_json::to_string(&c.handle.status()).unwrap();
+        assert!(!json.contains("tok-123"), "{json}");
+        assert!(!json.contains("urlsecret"), "{json}");
+
+        let t = with_auth(target(&url, "tok-123", true, false), AuthMode::Query);
+        let err = test_ws(&t, "Reception", "1.2.3").await.unwrap_err();
+        assert_eq!(err, DeliveryError::TokenRejected { status: 401 });
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(!json.contains("tok-123"), "{json}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ws_with_template_sends_example() {
+        let mut server = TestServer::start(None).await;
+        let t = with_template(
+            target(&server.url, "t", false, false),
+            r#"{"scanId":"{{scanId}}","dev":"{{device}}"}"#,
+        );
+        test_ws(&t, "Reception", "1.2.3").await.unwrap();
+        let mut conn = server.accept().await;
+        assert_eq!(conn.recv().await["type"], "hello");
+        assert_eq!(
+            conn.recv().await,
+            serde_json::json!({"scanId": "test", "dev": "Reception"})
+        );
     }
 
     #[test]
