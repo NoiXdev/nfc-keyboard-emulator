@@ -377,7 +377,12 @@ function changeLanguage(v: string) {
         />
       </div>
 
-      <StatusBar :status="status" :typing="typing" :ws="ws" />
+      <StatusBar
+        :status="status"
+        :typing="typing"
+        :ws="ws"
+        :http-enabled="config?.integration.http.enabled ?? false"
+      />
     </div>
 
     <ImportPreviewDialog

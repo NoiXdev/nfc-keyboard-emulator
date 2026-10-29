@@ -6,21 +6,33 @@ import type { WsStatus } from "../lib/tauri";
 
 const t = i18n.global.t;
 
-function render(ws: WsStatus | null) {
+function render(ws: WsStatus | null, httpEnabled = false) {
   return mount(StatusBar, {
-    props: { status: { kind: "connected" }, typing: true, ws },
+    props: { status: { kind: "connected" }, typing: true, ws, httpEnabled },
     global: { plugins: [i18n] },
   });
 }
 
 describe("StatusBar server item", () => {
-  it("is hidden without a status", () => {
-    expect(render(null).find('[data-test="server"]').exists()).toBe(false);
+  it("shows off without a status", () => {
+    expect(render(null).get('[data-test="server"]').text()).toContain(t("footer.off"));
   });
 
-  it("is hidden when the websocket is off", () => {
+  it("shows off when everything is off", () => {
     const w = render({ state: "off", requestPending: false });
-    expect(w.find('[data-test="server"]').exists()).toBe(false);
+    expect(w.get('[data-test="server"]').text()).toContain(t("footer.off"));
+  });
+
+  it("shows http push when only http is on", () => {
+    const w = render({ state: "off", requestPending: false }, true);
+    expect(w.get('[data-test="server"]').text()).toContain(t("footer.serverHttp"));
+  });
+
+  it("prefers the websocket state over http", () => {
+    const w = render({ state: "connected", requestPending: false }, true);
+    const text = w.get('[data-test="server"]').text();
+    expect(text).toContain(t("footer.serverConnected"));
+    expect(text).not.toContain(t("footer.serverHttp"));
   });
 
   it("shows the translated token rejected text", () => {

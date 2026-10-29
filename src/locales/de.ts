@@ -105,6 +105,7 @@ export default {
     serverConnecting: "verbindet",
     serverReconnecting: "verbindet neu ({error})",
     serverTokenRejected: "Token abgelehnt",
+    serverHttp: "HTTP-Push aktiv",
     serverWaiting: "wartet auf Scan",
   },
   server: {

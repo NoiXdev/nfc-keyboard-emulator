@@ -2,10 +2,17 @@
 import { useI18n } from "vue-i18n";
 import type { ReaderStatus, WsStatus } from "../lib/tauri";
 import { deliveryErrorText } from "../lib/delivery";
-defineProps<{ status: ReaderStatus | null; typing: boolean; ws: WsStatus | null }>();
+defineProps<{
+  status: ReaderStatus | null;
+  typing: boolean;
+  ws: WsStatus | null;
+  httpEnabled: boolean;
+}>();
 const { t } = useI18n();
 
-function serverText(ws: WsStatus): string {
+// With the websocket off, the item still says whether scans go out over HTTP.
+function serverText(ws: WsStatus | null, httpEnabled: boolean): string {
+  if (!ws || ws.state === "off") return httpEnabled ? t("footer.serverHttp") : t("footer.off");
   switch (ws.state) {
     case "reconnecting":
       return t("footer.serverReconnecting", { error: deliveryErrorText(t, ws.error) });
@@ -15,8 +22,19 @@ function serverText(ws: WsStatus): string {
       return t("footer.serverConnecting");
     case "token_rejected":
       return t("footer.serverTokenRejected");
+  }
+}
+
+function serverDot(ws: WsStatus | null, httpEnabled: boolean): string {
+  switch (ws?.state ?? "off") {
+    case "connected":
+      return "on";
+    case "token_rejected":
+      return "error";
+    case "off":
+      return httpEnabled ? "on" : "off";
     default:
-      return "";
+      return "typing";
   }
 }
 </script>
@@ -38,10 +56,10 @@ function serverText(ws: WsStatus): string {
       <span class="dot" :class="typing ? 'typing' : 'off'"></span>
       {{ t("footer.typing") }}: {{ typing ? t("footer.active") : t("footer.off") }}
     </span>
-    <span v-if="ws && ws.state !== 'off'" class="item" data-test="server">
-      <span class="dot" :class="ws.state === 'connected' ? 'on' : ws.state === 'token_rejected' ? 'error' : 'typing'"></span>
-      {{ t("footer.server") }}: {{ serverText(ws) }}
-      <template v-if="ws.requestPending">· {{ t("footer.serverWaiting") }}</template>
+    <span class="item" data-test="server">
+      <span class="dot" :class="serverDot(ws, httpEnabled)"></span>
+      {{ t("footer.server") }}: {{ serverText(ws, httpEnabled) }}
+      <template v-if="ws?.requestPending">· {{ t("footer.serverWaiting") }}</template>
     </span>
   </footer>
 </template>

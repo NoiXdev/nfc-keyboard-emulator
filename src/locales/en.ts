@@ -105,6 +105,7 @@ export default {
     serverConnecting: "connecting",
     serverReconnecting: "reconnecting ({error})",
     serverTokenRejected: "token rejected",
+    serverHttp: "HTTP push on",
     serverWaiting: "waiting for scan",
   },
   server: {
