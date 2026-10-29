@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod backoff;
 pub mod config;
 pub mod config_file;
