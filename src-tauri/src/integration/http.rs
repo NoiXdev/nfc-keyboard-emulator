@@ -177,6 +177,7 @@ mod tests {
             enabled: true,
             url,
             token: token.into(),
+            ..Default::default()
         }
     }
 

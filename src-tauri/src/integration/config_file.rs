@@ -6,6 +6,7 @@ use url::Url;
 
 use super::config::{valid_token, valid_url, IntegrationConfig};
 use super::http::origin_of;
+use super::template::TemplateError;
 
 pub const FORMAT_ID: &str = "nfc-keyboard-emulator/server-config";
 pub const FORMAT_VERSION: u32 = 1;
@@ -67,6 +68,14 @@ pub enum ImportError {
     InvalidWsUrl,
     InvalidHttpToken,
     InvalidWsToken,
+    InvalidHttpHeaderName,
+    InvalidWsHeaderName,
+    InvalidHttpUsername,
+    InvalidWsUsername,
+    InvalidHttpQueryParam,
+    InvalidWsQueryParam,
+    InvalidHttpTemplate { error: TemplateError },
+    InvalidWsTemplate { error: TemplateError },
     InvalidLink,
 }
 
@@ -379,12 +388,14 @@ mod tests {
                 enabled: true,
                 url: "https://example.com/api/scans".into(),
                 token: "http-secret".into(),
+                ..Default::default()
             },
             ws: WsTarget {
                 url: "wss://example.com:8443/scanner".into(),
                 token: "ws-secret".into(),
                 stream: true,
                 request: false,
+                ..Default::default()
             },
         }
     }

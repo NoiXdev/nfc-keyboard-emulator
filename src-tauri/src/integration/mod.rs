@@ -165,6 +165,7 @@ mod tests {
             enabled,
             url: url.into(),
             token: String::new(),
+            ..Default::default()
         }
     }
 
@@ -174,6 +175,7 @@ mod tests {
             token: String::new(),
             stream,
             request,
+            ..Default::default()
         }
     }
 

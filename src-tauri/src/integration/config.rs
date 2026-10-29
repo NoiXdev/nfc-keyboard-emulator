@@ -1,12 +1,17 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use super::auth::{validate_auth, AuthConfig, AuthError};
+use super::template::{validate_payload, PayloadConfig, TemplateError};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HttpTarget {
     pub enabled: bool,
     pub url: String,
     pub token: String,
+    pub auth: AuthConfig,
+    pub payload: PayloadConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -16,6 +21,8 @@ pub struct WsTarget {
     pub token: String,
     pub stream: bool,
     pub request: bool,
+    pub auth: AuthConfig,
+    pub payload: PayloadConfig,
 }
 
 impl WsTarget {
@@ -51,7 +58,7 @@ impl IntegrationConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 // The names are the `kind` tags the frontend translates.
 #[allow(clippy::enum_variant_names)]
@@ -60,10 +67,30 @@ pub enum ConfigError {
     InvalidWsUrl,
     InvalidHttpToken,
     InvalidWsToken,
+    InvalidHttpHeaderName,
+    InvalidWsHeaderName,
+    InvalidHttpUsername,
+    InvalidWsUsername,
+    InvalidHttpQueryParam,
+    InvalidWsQueryParam,
+    InvalidHttpTemplate { error: TemplateError },
+    InvalidWsTemplate { error: TemplateError },
 }
 
-/// Trims all strings and validates the URLs and tokens. An empty URL is valid (target not
-/// configured).
+/// Trims the auth names. The token and the template are not touched here: the token is trimmed
+/// with the other strings, the template is never trimmed.
+pub(crate) fn normalize_target_auth(auth: &mut AuthConfig) {
+    for s in [
+        &mut auth.header_name,
+        &mut auth.username,
+        &mut auth.query_param,
+    ] {
+        *s = s.trim().to_string();
+    }
+}
+
+/// Trims all strings (except templates) and validates the URLs, tokens, auth settings and
+/// templates. An empty URL is valid (target not configured).
 pub fn normalize(mut cfg: IntegrationConfig) -> Result<IntegrationConfig, ConfigError> {
     for s in [
         &mut cfg.device_name,
@@ -74,6 +101,8 @@ pub fn normalize(mut cfg: IntegrationConfig) -> Result<IntegrationConfig, Config
     ] {
         *s = s.trim().to_string();
     }
+    normalize_target_auth(&mut cfg.http.auth);
+    normalize_target_auth(&mut cfg.ws.auth);
     if !valid_url(&cfg.http.url, &["http", "https"]) {
         return Err(ConfigError::InvalidHttpUrl);
     }
@@ -86,6 +115,19 @@ pub fn normalize(mut cfg: IntegrationConfig) -> Result<IntegrationConfig, Config
     if !valid_token(&cfg.ws.token) {
         return Err(ConfigError::InvalidWsToken);
     }
+    validate_auth(&cfg.http.auth).map_err(|e| match e {
+        AuthError::HeaderName => ConfigError::InvalidHttpHeaderName,
+        AuthError::Username => ConfigError::InvalidHttpUsername,
+        AuthError::QueryParam => ConfigError::InvalidHttpQueryParam,
+    })?;
+    validate_auth(&cfg.ws.auth).map_err(|e| match e {
+        AuthError::HeaderName => ConfigError::InvalidWsHeaderName,
+        AuthError::Username => ConfigError::InvalidWsUsername,
+        AuthError::QueryParam => ConfigError::InvalidWsQueryParam,
+    })?;
+    validate_payload(&cfg.http.payload)
+        .map_err(|error| ConfigError::InvalidHttpTemplate { error })?;
+    validate_payload(&cfg.ws.payload).map_err(|error| ConfigError::InvalidWsTemplate { error })?;
     Ok(cfg)
 }
 
@@ -106,6 +148,8 @@ pub(crate) fn valid_url(value: &str, schemes: &[&str]) -> bool {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::integration::auth::AuthMode;
+    use crate::integration::template::PayloadMode;
 
     #[test]
     fn defaults_are_all_off() {
@@ -128,7 +172,9 @@ mod tests {
     fn integration_roundtrips_camelcase() {
         let json = serde_json::to_string(&Config::default()).unwrap();
         assert!(json.contains(r#""integration":{"deviceName""#));
-        assert!(json.contains(r#""ws":{"url":"","token":"","stream":false,"request":false}"#));
+        assert!(json.contains(
+            r#""ws":{"url":"","token":"","stream":false,"request":false,"auth":{"mode":"bearer","headerName":"X-API-Key","username":"","queryParam":"token"},"payload":{"mode":"standard","template":""}}"#
+        ));
         let back: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(back, Config::default());
     }
@@ -267,6 +313,160 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(c.effective_device_name(), "Reception");
+    }
+
+    #[test]
+    fn old_settings_file_loads_with_bearer_and_standard() {
+        let c: Config = serde_json::from_str(
+            r#"{"integration":{"deviceName":"R","http":{"enabled":true,"url":"https://x.test","token":"t"},"ws":{"url":"wss://x.test","token":"u","stream":true,"request":false}}}"#,
+        )
+        .unwrap();
+        assert_eq!(c.integration.http.auth, AuthConfig::default());
+        assert_eq!(c.integration.ws.auth, AuthConfig::default());
+        assert_eq!(c.integration.http.auth.mode, AuthMode::Bearer);
+        assert_eq!(c.integration.http.payload, PayloadConfig::default());
+        assert_eq!(c.integration.ws.payload.mode, PayloadMode::Standard);
+        assert_eq!(c.integration.http.token, "t");
+    }
+
+    #[test]
+    fn normalize_trims_auth_fields() {
+        let auth = AuthConfig {
+            mode: AuthMode::Header,
+            header_name: " X-Key \n".into(),
+            username: "\tuser ".into(),
+            query_param: " api_key ".into(),
+        };
+        let c = IntegrationConfig {
+            http: HttpTarget {
+                auth: auth.clone(),
+                ..Default::default()
+            },
+            ws: WsTarget {
+                auth,
+                payload: PayloadConfig {
+                    mode: PayloadMode::Template,
+                    template: " {\"a\": 1} \n".into(),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let n = normalize(c).unwrap();
+        for a in [&n.http.auth, &n.ws.auth] {
+            assert_eq!(a.header_name, "X-Key");
+            assert_eq!(a.username, "user");
+            assert_eq!(a.query_param, "api_key");
+        }
+        // The template is never trimmed.
+        assert_eq!(n.ws.payload.template, " {\"a\": 1} \n");
+    }
+
+    fn auth(mode: AuthMode, header: &str, user: &str, query: &str) -> AuthConfig {
+        AuthConfig {
+            mode,
+            header_name: header.into(),
+            username: user.into(),
+            query_param: query.into(),
+        }
+    }
+
+    #[test]
+    fn normalize_rejects_invalid_auth() {
+        let http = |a: AuthConfig| IntegrationConfig {
+            http: HttpTarget {
+                auth: a,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let ws = |a: AuthConfig| IntegrationConfig {
+            ws: WsTarget {
+                auth: a,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let bad_header = auth(AuthMode::Header, "Bad Name", "", "token");
+        let bad_user = auth(AuthMode::Basic, "X-API-Key", "a:b", "token");
+        let bad_query = auth(AuthMode::Query, "X-API-Key", "", "bad param");
+        assert_eq!(
+            normalize(http(bad_header.clone())),
+            Err(ConfigError::InvalidHttpHeaderName)
+        );
+        assert_eq!(
+            normalize(ws(bad_header)),
+            Err(ConfigError::InvalidWsHeaderName)
+        );
+        assert_eq!(
+            normalize(http(bad_user.clone())),
+            Err(ConfigError::InvalidHttpUsername)
+        );
+        assert_eq!(normalize(ws(bad_user)), Err(ConfigError::InvalidWsUsername));
+        assert_eq!(
+            normalize(http(bad_query.clone())),
+            Err(ConfigError::InvalidHttpQueryParam)
+        );
+        assert_eq!(
+            normalize(ws(bad_query)),
+            Err(ConfigError::InvalidWsQueryParam)
+        );
+        // Only the active mode's field is checked.
+        assert!(normalize(http(auth(AuthMode::Bearer, "Bad Name", "a:b", "bad param"))).is_ok());
+    }
+
+    #[test]
+    fn normalize_rejects_invalid_template() {
+        let template = |t: &str, mode| PayloadConfig {
+            mode,
+            template: t.into(),
+        };
+        let ws = IntegrationConfig {
+            ws: WsTarget {
+                payload: template(r#"{"a":"{{foo}}"}"#, PayloadMode::Template),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            normalize(ws),
+            Err(ConfigError::InvalidWsTemplate {
+                error: TemplateError::UnknownPlaceholder { name: "foo".into() }
+            })
+        );
+        let http = IntegrationConfig {
+            http: HttpTarget {
+                payload: template("not json", PayloadMode::Template),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            normalize(http),
+            Err(ConfigError::InvalidHttpTemplate {
+                error: TemplateError::NotJson
+            })
+        );
+        // A bad template is ignored in standard mode.
+        let standard = IntegrationConfig {
+            ws: WsTarget {
+                payload: template("{{foo}}", PayloadMode::Standard),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(normalize(standard).is_ok());
+    }
+
+    #[test]
+    fn config_error_serializes_template_error() {
+        let e = ConfigError::InvalidHttpTemplate {
+            error: TemplateError::UnknownPlaceholder { name: "foo".into() },
+        };
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"kind":"invalid_http_template","error":{"kind":"unknown_placeholder","name":"foo"}}"#
+        );
     }
 
     #[test]

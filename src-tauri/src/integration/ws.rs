@@ -770,6 +770,7 @@ mod tests {
             token: token.into(),
             stream,
             request,
+            ..Default::default()
         }
     }
 

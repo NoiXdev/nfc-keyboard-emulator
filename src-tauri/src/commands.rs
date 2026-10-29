@@ -1,7 +1,9 @@
 use crate::config::{Config, FormatConfig};
 use crate::csv_export::scans_to_csv;
 use crate::formatter::format_uid;
-use crate::integration::config::{normalize, ConfigError, HttpTarget, IntegrationConfig, WsTarget};
+use crate::integration::config::{
+    normalize, normalize_target_auth, ConfigError, HttpTarget, IntegrationConfig, WsTarget,
+};
 use crate::integration::config_file::{
     self, parse_config_file, ImportError, ImportPreview, ImportSource, ServerConfigFile,
 };
@@ -251,6 +253,14 @@ pub fn apply_import(
         ConfigError::InvalidWsUrl => ImportError::InvalidWsUrl,
         ConfigError::InvalidHttpToken => ImportError::InvalidHttpToken,
         ConfigError::InvalidWsToken => ImportError::InvalidWsToken,
+        ConfigError::InvalidHttpHeaderName => ImportError::InvalidHttpHeaderName,
+        ConfigError::InvalidWsHeaderName => ImportError::InvalidWsHeaderName,
+        ConfigError::InvalidHttpUsername => ImportError::InvalidHttpUsername,
+        ConfigError::InvalidWsUsername => ImportError::InvalidWsUsername,
+        ConfigError::InvalidHttpQueryParam => ImportError::InvalidHttpQueryParam,
+        ConfigError::InvalidWsQueryParam => ImportError::InvalidWsQueryParam,
+        ConfigError::InvalidHttpTemplate { error } => ImportError::InvalidHttpTemplate { error },
+        ConfigError::InvalidWsTemplate { error } => ImportError::InvalidWsTemplate { error },
     })
 }
 
@@ -276,11 +286,12 @@ pub async fn test_http(
     http: HttpTarget,
     device_name: String,
 ) -> Result<(), DeliveryError> {
-    let target = HttpTarget {
+    let mut target = HttpTarget {
         url: http.url.trim().to_string(),
         token: http.token.trim().to_string(),
         ..http
     };
+    normalize_target_auth(&mut target.auth);
     http::test_http(hub.http(), &target, &test_device(device_name)).await
 }
 
@@ -290,11 +301,12 @@ pub async fn test_ws(
     ws: WsTarget,
     device_name: String,
 ) -> Result<(), DeliveryError> {
-    let target = WsTarget {
+    let mut target = WsTarget {
         url: ws.url.trim().to_string(),
         token: ws.token.trim().to_string(),
         ..ws
     };
+    normalize_target_auth(&mut target.auth);
     ws::test_ws(
         &target,
         &test_device(device_name),
