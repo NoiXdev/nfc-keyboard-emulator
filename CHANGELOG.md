@@ -1,3 +1,49 @@
+## [1.1.0](https://github.com/NoiXdev/nfc-keyboard-emulator/compare/v1.0.1...v1.1.0) (2026-10-29)
+
+
+### Features
+
+* **integration:** add configurable token transport ([7f93435](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/7f93435ac38e1ff833b175c2a5e16e964363b569))
+* **integration:** add scan request slot and answer requests in the worker ([c01b0d8](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/c01b0d828791e75253c291ea80efc231792f12fe))
+* **integration:** add server config file format and link decoding ([657a9e9](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/657a9e99cdfecd5d4d5be931e640e0e38d24823b))
+* **integration:** add server integration settings to config ([2a9d9db](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/2a9d9dbca2596f517be811e4eb47d09518572590))
+* **integration:** add websocket stream and server scan requests ([68e4fee](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/68e4fee02371757295cb7ddade7212ec3bf8b5f8))
+* **integration:** apply auth and payload settings to the websocket ([1a843c5](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/1a843c5226096d34fa8c5ca878ad2b5def517142))
+* **integration:** carry auth and payload settings through import and export ([f21d591](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/f21d59148e3d153a3f996225362142f7be84382d))
+* **integration:** define server protocol messages and reconnect backoff ([e18596d](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/e18596d8212edf679e2e83724c3f8e8449aebb1f))
+* **integration:** deliver scans by HTTP push ([e112227](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/e1122274ff923885cf773ea0412f527f32cb934c))
+* **integration:** import and export server settings by file and link ([69f0782](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/69f0782110cd2a8184cafabc3f9c03e1b5779742))
+* **integration:** render custom JSON payload templates ([3517177](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/35171773c4954a428e61c1b63374c38dfcb35ec7))
+* **integration:** route scans to http and websocket targets ([1dd2011](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/1dd201168c707944b00a9659470ab0cf37f8ec7b))
+* **integration:** send HTTP scans with the configured auth and payload ([b604f78](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/b604f786eca6149e5955e97836445dea8c0fd076))
+* **integration:** store auth and payload settings per target ([a24c96a](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/a24c96a27671a9e523593fbc1b9041da8345e391))
+* **scan:** add scan id, formatted uid and request id to scan records ([7412889](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/74128897d7cb891a8018ba7c2058f5a74ed8359c))
+* **ui:** add advanced auth and payload settings to the server view ([8ef250f](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/8ef250ff50ca79e22de6e447c37fb0e03523a263))
+* **ui:** add server settings view and import preview ([b05a0f1](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/b05a0f1e033e2c3cd072be6a8862ffe72db596b4))
+* **ui:** add template renderer and error texts for advanced settings ([11712ad](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/11712ad9b9eb8bcdfa5d8370347a16c2a94784ed))
+* **ui:** always show the server status in the footer ([c66c3c0](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/c66c3c04b07305222baca837cb0ffff2dd959d66))
+* **ui:** show auth and payload changes in the import preview ([8fede4f](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/8fede4ffeb6b3123dad3a5eb7fc69e4f6ec1cc0a))
+* **ui:** show server delivery in the scan log and websocket state in the status bar ([30e0d15](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/30e0d15f7f4dd7c9f034196681b897be2fd226b7))
+
+
+### Bug Fixes
+
+* **examples:** keep the example server alive on bad clients ([38c5bd2](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/38c5bd2ec20eb45573e10f904a5226c519f9e4ab))
+* **examples:** only end requests owned by the closing app ([d3c5146](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/d3c5146f4218b4885418d43d5f7f1ac675edcd36))
+* **integration:** also stream scans that answer a request ([aa973ff](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/aa973ff29847a6d7425045ed39fccfc937c5f277))
+* **integration:** always export auth and payload settings ([5ee77d2](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/5ee77d2b2b9478062b1884140587d82e9352e21c))
+* **integration:** detect dead websocket peers ([1959e35](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/1959e35ae8e94ef065c8d9159f8f503488608fdc))
+* **integration:** do not follow redirects and use ring for TLS ([12197fa](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/12197fafdd469b659a988eed1a44e5a631f57026))
+* **integration:** only reset reconnect backoff after a stable session ([3ce1962](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/3ce1962a6011309535ef85e53014b0473709cd50))
+* **integration:** reject tokens with invalid characters ([9ddff92](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/9ddff925d8632e9b72f8eae794734af61fda7be7))
+* **integration:** report invalid test auth and split import warnings ([d1e999e](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/d1e999e140646531dba002b3e18b57473ad929c3))
+* **integration:** route each scan from one config snapshot ([15a2739](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/15a27399c4315da1c0b8472fd759bf812459d989))
+* **integration:** send payload timestamps in UTC with milliseconds ([3aac75d](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/3aac75d40594bab820b76631035bd045329df878))
+* **integration:** show errors from links that start the app ([a03167b](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/a03167bdb0649ae992f7050589519c0fc3247d50))
+* **integration:** show host changes in the import preview ([7392b1f](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/7392b1f17d84eb6df8c9507c207c6e51ac081e06))
+* **ui:** correct auth error texts, import warnings and footer state ([75686df](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/75686df4735d9442e83bb8fd7cdad531af34f463))
+* **ui:** dedupe scan-request notices and ignore stale test results ([ebb9f4e](https://github.com/NoiXdev/nfc-keyboard-emulator/commit/ebb9f4e7a945754cc0283f449e1d1062da3f0d4b))
+
 ## [1.0.1](https://github.com/NoiXdev/nfc-keyboard-emulator/compare/v1.0.0...v1.0.1) (2026-09-16)
 
 
